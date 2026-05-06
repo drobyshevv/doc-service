@@ -1,3 +1,5 @@
+// Package config отвечает за загрузку,
+// валидацию и предоставление конфигурации приложения.
 package config
 
 import (
@@ -7,6 +9,7 @@ import (
 	"github.com/ilyakaznacheev/cleanenv"
 )
 
+// Config содержит конфигурацию всех модулей приложения.
 type Config struct {
 	HTTP   HTTPConfig   `yaml:"http"`
 	DB     DBConfig     `yaml:"database"`
@@ -15,10 +18,12 @@ type Config struct {
 	Search SearchConfig `yaml:"search"`
 }
 
+// HTTPConfig содержит настройки HTTP-сервера.
 type HTTPConfig struct {
 	Port int `yaml:"port" env:"HTTP_PORT" env-default:"8081"`
 }
 
+// DBConfig содержит настройки подключения к PostgreSQL.
 type DBConfig struct {
 	Host     string `yaml:"host" env:"DB_HOST" env-default:"localhost"`
 	Port     int    `yaml:"port" env:"DB_PORT" env-default:"5432"`
@@ -28,6 +33,7 @@ type DBConfig struct {
 	SSLMode  string `yaml:"sslmode" env:"DB_SSLMODE" env-default:"disable"`
 }
 
+// RedisConfig содержит настройки подключения к Redis.
 type RedisConfig struct {
 	Host     string `yaml:"host" env:"REDIS_HOST" env-default:"localhost"`
 	Port     int    `yaml:"port" env:"REDIS_PORT" env-default:"6379"`
@@ -35,6 +41,7 @@ type RedisConfig struct {
 	DB       int    `yaml:"db" env:"REDIS_DB" env-default:"0"`
 }
 
+// S3Config содержит настройки S3-совместимого хранилища.
 type S3Config struct {
 	Endpoint  string `yaml:"endpoint" env:"S3_ENDPOINT"`
 	AccessKey string `yaml:"access_key" env:"S3_ACCESS_KEY"`
@@ -43,12 +50,15 @@ type S3Config struct {
 	UseSSL    bool   `yaml:"use_ssl" env:"S3_USE_SSL" env-default:"false"`
 }
 
+// SearchConfig содержит настройки поискового движка.
 type SearchConfig struct {
 	SnippetLength int `yaml:"snippet_length" env:"SEARCH_SNIPPET_LENGTH" env-default:"200"`
 	MaxResults    int `yaml:"max_results" env:"SEARCH_MAX_RESULTS" env-default:"20"`
 	MinTermLength int `yaml:"min_term_length" env:"SEARCH_MIN_TERM_LENGTH" env-default:"2"`
 }
 
+// LoadConfig загружает конфигурацию из YAML-файла,
+// применяет переменные окружения и валидирует результат.
 func LoadConfig(path string) (*Config, error) {
 	var cfg Config
 
@@ -67,6 +77,7 @@ func LoadConfig(path string) (*Config, error) {
 	return &cfg, nil
 }
 
+// DBConnStr возвращает PostgreSQL connection string.
 func (c *Config) DBConnStr() string {
 	return fmt.Sprintf(
 		"postgres://%s:%s@%s:%d/%s?sslmode=%s",
@@ -79,10 +90,12 @@ func (c *Config) DBConnStr() string {
 	)
 }
 
+// RedisAddr возвращает адрес Redis в формате host:port.
 func (c *Config) RedisAddr() string {
 	return fmt.Sprintf("%s:%d", c.Redis.Host, c.Redis.Port)
 }
 
+// HTTPAddr возвращает адрес HTTP-сервера.
 func (c *Config) HTTPAddr() string {
 	return fmt.Sprintf(":%d", c.HTTP.Port)
 }

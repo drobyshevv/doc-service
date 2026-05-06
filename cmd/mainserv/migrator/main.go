@@ -1,20 +1,65 @@
+// Command migrate управляет миграциями базы данных.
+//
+// Поддерживаемые команды:
+//   - up
+//   - down
+//   - step N
+//   - force N
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"strconv"
+	"time"
 
 	"github.com/drobyshevv/doc-service/internal/mainserv/config"
 	"github.com/golang-migrate/migrate/v4"
 	_ "github.com/golang-migrate/migrate/v4/database/postgres"
 	_ "github.com/golang-migrate/migrate/v4/source/file"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+const (
+	maxRetries    = 10
+	retryInterval = 2 * time.Second
+)
+
+func waitForDB(connStr string) error {
+	var lastErr error
+
+	for i := 0; i < maxRetries; i++ {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+
+		pool, err := pgxpool.New(ctx, connStr)
+		if err == nil {
+			err = pool.Ping(ctx)
+			pool.Close()
+		}
+
+		if err == nil {
+			fmt.Println("postgres is ready")
+			return nil
+		}
+
+		lastErr = err
+		fmt.Printf("waiting for postgres... (%d/%d)\n", i+1, maxRetries)
+		time.Sleep(retryInterval)
+	}
+
+	return fmt.Errorf("postgres not ready after retries: %w", lastErr)
+}
 
 func main() {
 	cfg, err := config.LoadConfig("configs/mainserv.yaml")
 	if err != nil {
 		panic(fmt.Errorf("load config: %w", err))
+	}
+
+	if err := waitForDB(cfg.DBConnStr()); err != nil {
+		panic(err)
 	}
 
 	m, err := migrate.New(
@@ -33,6 +78,7 @@ func main() {
 	command := os.Args[1]
 
 	switch command {
+
 	case "up":
 		if err := m.Up(); err != nil && err != migrate.ErrNoChange {
 			panic(err)
@@ -58,6 +104,7 @@ func main() {
 		if err := m.Steps(steps); err != nil && err != migrate.ErrNoChange {
 			panic(err)
 		}
+
 		fmt.Printf("migrated %d steps\n", steps)
 
 	case "force":
@@ -73,6 +120,7 @@ func main() {
 		if err := m.Force(version); err != nil {
 			panic(err)
 		}
+
 		fmt.Printf("migration version forced to %d\n", version)
 
 	default:
