@@ -39,9 +39,10 @@ func (r *DocumentRepository) Create(
 			s3_key,
 			is_public,
 			file_size,
-			mime_type
+			mime_type,
+			token_count
 		)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
 		RETURNING created_at, updated_at
 	`
 
@@ -56,6 +57,7 @@ func (r *DocumentRepository) Create(
 		doc.IsPublic,
 		doc.FileSize,
 		doc.MimeType,
+		doc.TokenCount,
 	).Scan(
 		&doc.CreatedAt,
 		&doc.UpdatedAt,
@@ -79,6 +81,7 @@ func (r *DocumentRepository) GetByID(
 			is_public,
 			file_size,
 			mime_type,
+			token_count,
 			created_at,
 			updated_at
 		FROM documents
@@ -96,6 +99,7 @@ func (r *DocumentRepository) GetByID(
 		&doc.IsPublic,
 		&doc.FileSize,
 		&doc.MimeType,
+		&doc.TokenCount,
 		&doc.CreatedAt,
 		&doc.UpdatedAt,
 	)

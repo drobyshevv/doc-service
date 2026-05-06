@@ -351,20 +351,23 @@ func (r *SearchRepository) CountDocuments(ctx context.Context) (int, error) {
 	return count, nil
 }
 
-func (r *SearchRepository) CountDocsWithTerm(ctx context.Context, term string) (int, error) {
-	var count int
+func (r *SearchRepository) GetDocumentFrequency(
+	ctx context.Context,
+	term string,
+) (int, error) {
 
 	query := `
-		SELECT COUNT(DISTINCT p.document_id)
-		FROM postings p
-		JOIN terms t ON t.id = p.term_id
-		WHERE t.term = $1
+		SELECT document_frequency
+		FROM terms
+		WHERE term = $1
 	`
 
-	err := r.db.QueryRow(ctx, query, term).Scan(&count)
+	var df int
+
+	err := r.db.QueryRow(ctx, query, term).Scan(&df)
 	if err != nil {
 		return 0, err
 	}
 
-	return count, nil
+	return df, nil
 }

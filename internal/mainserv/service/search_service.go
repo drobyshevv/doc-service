@@ -134,18 +134,17 @@ func (s *SearchService) Search(
 
 	limit = normalizeLimit(limit)
 
-	terms := uniqueTerms(tokenizer.Tokenize(query))
-
-	documentScores := make(map[uuid.UUID]float64)
+	terms := tokenizer.Tokenize(query)
+	if len(terms) > maxTerms {
+		terms = terms[:maxTerms]
+	}
 
 	totalDocs, err := s.searchRepo.CountDocuments(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	if totalDocs == 0 {
-		return []SearchResult{}, nil
-	}
+	documentScores := make(map[uuid.UUID]float64)
 
 	for _, term := range terms {
 
@@ -154,9 +153,9 @@ func (s *SearchService) Search(
 			return nil, err
 		}
 
-		docsWithTerm, err := s.searchRepo.CountDocsWithTerm(ctx, term)
+		docsWithTerm, err := s.searchRepo.GetDocumentFrequency(ctx, term)
 		if err != nil {
-			return nil, err
+			continue
 		}
 
 		if docsWithTerm == 0 {
@@ -165,10 +164,16 @@ func (s *SearchService) Search(
 
 		for _, posting := range postings {
 
+			doc, err := s.docRepo.GetByID(ctx, posting.DocumentID)
+			if err != nil {
+				continue
+			}
+
 			score := calcScore(
 				posting.TermFrequency,
 				docsWithTerm,
 				totalDocs,
+				doc.TokenCount,
 			)
 
 			documentScores[posting.DocumentID] += score
@@ -234,39 +239,42 @@ func (s *SearchService) SearchPhrase(
 		return s.Search(ctx, query, limit)
 	}
 
-	documentScores := make(map[uuid.UUID]float64)
-
 	totalDocs, err := s.searchRepo.CountDocuments(ctx)
 	if err != nil {
 		return nil, err
 	}
+
+	documentScores := make(map[uuid.UUID]float64)
 
 	postings, err := s.searchRepo.SearchPhrase(ctx, terms)
 	if err != nil {
 		return nil, err
 	}
 
-	for _, term := range terms {
+	for _, posting := range postings {
 
-		docsWithTerm, err := s.searchRepo.CountDocsWithTerm(ctx, term)
+		doc, err := s.docRepo.GetByID(ctx, posting.DocumentID)
 		if err != nil {
-			return nil, err
-		}
-
-		if docsWithTerm == 0 {
 			continue
 		}
 
-		for _, posting := range postings {
+		score := 0.0
 
-			score := calcScore(
+		for _, term := range terms {
+			df, err := s.searchRepo.GetDocumentFrequency(ctx, term)
+			if err != nil || df == 0 {
+				continue
+			}
+
+			score += calcScore(
 				posting.TermFrequency,
-				docsWithTerm,
+				df,
 				totalDocs,
+				doc.TokenCount,
 			)
-
-			documentScores[posting.DocumentID] += score
 		}
+
+		documentScores[posting.DocumentID] += score
 	}
 
 	return aggregateResults(documentScores, s.docRepo, ctx, limit)
@@ -293,7 +301,13 @@ func (s *SearchService) Suggest(
 	return s.searchRepo.SuggestTerms(ctx, prefix, limit)
 }
 
-func calcScore(tf int, docsWithTerm, totalDocs int) float64 {
+func calcScore(
+	tf int,
+	docsWithTerm int,
+	totalDocs int,
+	docLength int,
+) float64 {
+
 	tfNorm := 1 + math.Log(float64(tf))
 
 	idf := math.Log(
@@ -301,7 +315,13 @@ func calcScore(tf int, docsWithTerm, totalDocs int) float64 {
 			(float64(docsWithTerm) + 1),
 	)
 
-	return tfNorm * idf
+	score := tfNorm * idf
+
+	if docLength > 0 {
+		score = score / math.Sqrt(float64(docLength))
+	}
+
+	return score
 }
 
 func uniqueTerms(terms []string) []string {

@@ -15,6 +15,7 @@ type Document struct {
 	IsPublic         bool      `db:"is_public"`
 	FileSize         int64     `db:"file_size"`
 	MimeType         string    `db:"mime_type"`
+	TokenCount       int       `db:"token_count"`
 	CreatedAt        time.Time `db:"created_at"`
 	UpdatedAt        time.Time `db:"updated_at"`
 }

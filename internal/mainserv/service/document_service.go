@@ -2,12 +2,12 @@ package service
 
 import (
 	"context"
-	"math"
 	"mime"
 	"path/filepath"
 
 	"github.com/drobyshevv/doc-service/internal/mainserv/model"
 	"github.com/drobyshevv/doc-service/internal/mainserv/search/indexer"
+	"github.com/drobyshevv/doc-service/internal/mainserv/search/tokenizer"
 	"github.com/drobyshevv/doc-service/internal/mainserv/storage/postgres"
 	s3storage "github.com/drobyshevv/doc-service/internal/mainserv/storage/s3"
 	"github.com/google/uuid"
@@ -71,6 +71,8 @@ func (s *DocumentService) UploadDocument(
 		title = input.Filename
 	}
 
+	tokens := tokenizer.Tokenize(string(input.Data))
+
 	doc := &model.Document{
 		ID:               docID,
 		OwnerID:          input.OwnerID,
@@ -80,6 +82,7 @@ func (s *DocumentService) UploadDocument(
 		IsPublic:         input.IsPublic,
 		FileSize:         int64(len(input.Data)),
 		MimeType:         contentType,
+		TokenCount:       len(tokens),
 	}
 
 	err = s.docRepo.Create(ctx, doc)
@@ -103,36 +106,11 @@ func (s *DocumentService) indexDocument(
 
 	indexedTerms := indexer.BuildIndex(docID, text)
 
-	totalDocs, err := s.searchRepo.CountDocuments(ctx)
-	if err != nil {
-		return err
-	}
-
-	if totalDocs == 0 {
-		totalDocs = 1
-	}
-
 	for _, indexedTerm := range indexedTerms {
-
-		tf := 1 + math.Log(float64(indexedTerm.Frequency))
-
-		docsWithTerm, err := s.searchRepo.CountDocsWithTerm(ctx, indexedTerm.Term)
-		if err != nil {
-			return err
-		}
-
-		if docsWithTerm == 0 {
-			continue
-		}
-
-		idf := math.Log(
-			(float64(totalDocs) + 1) /
-				(float64(docsWithTerm) + 1),
+		termID, err := s.searchRepo.CreateTerm(
+			ctx,
+			indexedTerm.Term,
 		)
-
-		_ = tf * idf
-
-		termID, err := s.searchRepo.CreateTerm(ctx, indexedTerm.Term)
 		if err != nil {
 			return err
 		}
