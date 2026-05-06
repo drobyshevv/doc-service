@@ -100,10 +100,9 @@ func (r *SearchRepository) CreatePosting(
 		INSERT INTO postings (
 			term_id,
 			document_id,
-			term_frequency,
-			tfidf_score
+			term_frequency
 		)
-		VALUES ($1,$2,$3,$4)
+		VALUES ($1,$2,$3)
 		RETURNING id
 	`
 
@@ -115,7 +114,6 @@ func (r *SearchRepository) CreatePosting(
 		posting.TermID,
 		posting.DocumentID,
 		posting.TermFrequency,
-		posting.TFIDFScore,
 	).Scan(&postingID)
 
 	if err != nil {
@@ -179,12 +177,10 @@ func (r *SearchRepository) SearchByTerm(
 			p.id,
 			p.term_id,
 			p.document_id,
-			p.term_frequency,
-			p.tfidf_score
+			p.term_frequency
 		FROM postings p
 		JOIN terms t ON p.term_id = t.id
 		WHERE t.term = $1
-		ORDER BY p.tfidf_score DESC
 		LIMIT 100
 	`
 
@@ -204,7 +200,6 @@ func (r *SearchRepository) SearchByTerm(
 			&posting.TermID,
 			&posting.DocumentID,
 			&posting.TermFrequency,
-			&posting.TFIDFScore,
 		)
 		if err != nil {
 			return nil, err
@@ -213,11 +208,7 @@ func (r *SearchRepository) SearchByTerm(
 		postings = append(postings, posting)
 	}
 
-	if rows.Err() != nil {
-		return nil, rows.Err()
-	}
-
-	return postings, nil
+	return postings, rows.Err()
 }
 
 // GetPostingByDocumentAndTerm возвращает posting
@@ -234,7 +225,6 @@ func (r *SearchRepository) GetPostingByDocumentAndTerm(
 			term_id,
 			document_id,
 			term_frequency,
-			tfidf_score
 		FROM postings
 		WHERE document_id = $1 AND term_id = $2
 	`
@@ -246,7 +236,6 @@ func (r *SearchRepository) GetPostingByDocumentAndTerm(
 		&posting.TermID,
 		&posting.DocumentID,
 		&posting.TermFrequency,
-		&posting.TFIDFScore,
 	)
 	if err != nil {
 		return nil, err
@@ -266,15 +255,14 @@ func (r *SearchRepository) SearchPhrase(
 ) ([]model.Posting, error) {
 
 	query := `
-		SELECT DISTINCT p.id,
-			   p.term_id,
-			   p.document_id,
-			   p.term_frequency,
-			   p.tfidf_score
+		SELECT DISTINCT
+			p.id,
+			p.term_id,
+			p.document_id,
+			p.term_frequency
 		FROM postings p
 		JOIN terms t ON p.term_id = t.id
 		WHERE t.term = ANY($1)
-		ORDER BY p.tfidf_score DESC
 		LIMIT 100
 	`
 
@@ -294,7 +282,6 @@ func (r *SearchRepository) SearchPhrase(
 			&posting.TermID,
 			&posting.DocumentID,
 			&posting.TermFrequency,
-			&posting.TFIDFScore,
 		)
 		if err != nil {
 			return nil, err

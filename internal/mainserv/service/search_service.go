@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"math"
 	"sort"
 	"strings"
 
@@ -133,21 +134,44 @@ func (s *SearchService) Search(
 
 	limit = normalizeLimit(limit)
 
-	terms := tokenizer.Tokenize(query)
-	if len(terms) > maxTerms {
-		terms = terms[:maxTerms]
-	}
+	terms := uniqueTerms(tokenizer.Tokenize(query))
 
 	documentScores := make(map[uuid.UUID]float64)
 
+	totalDocs, err := s.searchRepo.CountDocuments(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	if totalDocs == 0 {
+		return []SearchResult{}, nil
+	}
+
 	for _, term := range terms {
+
 		postings, err := s.searchRepo.SearchByTerm(ctx, term)
 		if err != nil {
 			return nil, err
 		}
 
+		docsWithTerm, err := s.searchRepo.CountDocsWithTerm(ctx, term)
+		if err != nil {
+			return nil, err
+		}
+
+		if docsWithTerm == 0 {
+			continue
+		}
+
 		for _, posting := range postings {
-			documentScores[posting.DocumentID] += posting.TFIDFScore
+
+			score := calcScore(
+				posting.TermFrequency,
+				docsWithTerm,
+				totalDocs,
+			)
+
+			documentScores[posting.DocumentID] += score
 		}
 	}
 
@@ -212,13 +236,37 @@ func (s *SearchService) SearchPhrase(
 
 	documentScores := make(map[uuid.UUID]float64)
 
+	totalDocs, err := s.searchRepo.CountDocuments(ctx)
+	if err != nil {
+		return nil, err
+	}
+
 	postings, err := s.searchRepo.SearchPhrase(ctx, terms)
 	if err != nil {
 		return nil, err
 	}
 
-	for _, posting := range postings {
-		documentScores[posting.DocumentID] += posting.TFIDFScore
+	for _, term := range terms {
+
+		docsWithTerm, err := s.searchRepo.CountDocsWithTerm(ctx, term)
+		if err != nil {
+			return nil, err
+		}
+
+		if docsWithTerm == 0 {
+			continue
+		}
+
+		for _, posting := range postings {
+
+			score := calcScore(
+				posting.TermFrequency,
+				docsWithTerm,
+				totalDocs,
+			)
+
+			documentScores[posting.DocumentID] += score
+		}
 	}
 
 	return aggregateResults(documentScores, s.docRepo, ctx, limit)
@@ -243,4 +291,34 @@ func (s *SearchService) Suggest(
 	limit = normalizeLimit(limit)
 
 	return s.searchRepo.SuggestTerms(ctx, prefix, limit)
+}
+
+func calcScore(tf int, docsWithTerm, totalDocs int) float64 {
+	tfNorm := 1 + math.Log(float64(tf))
+
+	idf := math.Log(
+		(float64(totalDocs) + 1) /
+			(float64(docsWithTerm) + 1),
+	)
+
+	return tfNorm * idf
+}
+
+func uniqueTerms(terms []string) []string {
+	seen := make(map[string]struct{})
+	res := make([]string, 0, len(terms))
+
+	for _, t := range terms {
+		if _, ok := seen[t]; ok {
+			continue
+		}
+		seen[t] = struct{}{}
+		res = append(res, t)
+	}
+
+	if len(res) > maxTerms {
+		return res[:maxTerms]
+	}
+
+	return res
 }

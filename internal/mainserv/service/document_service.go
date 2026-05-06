@@ -109,7 +109,7 @@ func (s *DocumentService) indexDocument(
 	}
 
 	if totalDocs == 0 {
-		return nil
+		totalDocs = 1
 	}
 
 	for _, indexedTerm := range indexedTerms {
@@ -130,7 +130,7 @@ func (s *DocumentService) indexDocument(
 				(float64(docsWithTerm) + 1),
 		)
 
-		score := tf * idf
+		_ = tf * idf
 
 		termID, err := s.searchRepo.CreateTerm(ctx, indexedTerm.Term)
 		if err != nil {
@@ -143,7 +143,6 @@ func (s *DocumentService) indexDocument(
 				TermID:        termID,
 				DocumentID:    docID,
 				TermFrequency: indexedTerm.Frequency,
-				TFIDFScore:    score,
 			},
 		)
 		if err != nil {
