@@ -170,14 +170,15 @@ func (r *SearchRepository) CreateTermPositions(
 func (r *SearchRepository) SearchByTerm(
 	ctx context.Context,
 	term string,
-) ([]model.Posting, error) {
+) ([]model.SearchPosting, error) {
 
 	query := `
 		SELECT
 			p.id,
 			p.term_id,
 			p.document_id,
-			p.term_frequency
+			p.term_frequency,
+			t.document_frequency
 		FROM postings p
 		JOIN terms t ON p.term_id = t.id
 		WHERE t.term = $1
@@ -190,25 +191,26 @@ func (r *SearchRepository) SearchByTerm(
 	}
 	defer rows.Close()
 
-	var postings []model.Posting
+	var res []model.SearchPosting
 
 	for rows.Next() {
-		var posting model.Posting
+		var sp model.SearchPosting
 
 		err := rows.Scan(
-			&posting.ID,
-			&posting.TermID,
-			&posting.DocumentID,
-			&posting.TermFrequency,
+			&sp.ID,
+			&sp.TermID,
+			&sp.DocumentID,
+			&sp.TermFrequency,
+			&sp.DocumentFrequency,
 		)
 		if err != nil {
 			return nil, err
 		}
 
-		postings = append(postings, posting)
+		res = append(res, sp)
 	}
 
-	return postings, rows.Err()
+	return res, rows.Err()
 }
 
 // GetPostingByDocumentAndTerm возвращает posting
@@ -252,14 +254,15 @@ func (r *SearchRepository) GetPostingByDocumentAndTerm(
 func (r *SearchRepository) SearchPhrase(
 	ctx context.Context,
 	terms []string,
-) ([]model.Posting, error) {
+) ([]model.SearchPosting, error) {
 
 	query := `
 		SELECT DISTINCT
 			p.id,
 			p.term_id,
 			p.document_id,
-			p.term_frequency
+			p.term_frequency,
+			t.document_frequency
 		FROM postings p
 		JOIN terms t ON p.term_id = t.id
 		WHERE t.term = ANY($1)
@@ -272,25 +275,26 @@ func (r *SearchRepository) SearchPhrase(
 	}
 	defer rows.Close()
 
-	var postings []model.Posting
+	var res []model.SearchPosting
 
 	for rows.Next() {
-		var posting model.Posting
+		var sp model.SearchPosting
 
 		err := rows.Scan(
-			&posting.ID,
-			&posting.TermID,
-			&posting.DocumentID,
-			&posting.TermFrequency,
+			&sp.ID,
+			&sp.TermID,
+			&sp.DocumentID,
+			&sp.TermFrequency,
+			&sp.DocumentFrequency,
 		)
 		if err != nil {
 			return nil, err
 		}
 
-		postings = append(postings, posting)
+		res = append(res, sp)
 	}
 
-	return postings, rows.Err()
+	return res, rows.Err()
 }
 
 // SuggestTerms возвращает список терминов,

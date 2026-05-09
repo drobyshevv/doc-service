@@ -115,6 +115,66 @@ func (r *DocumentRepository) GetByID(
 	return &doc, nil
 }
 
+func (r *DocumentRepository) GetByIDs(
+	ctx context.Context,
+	ids []uuid.UUID,
+) (map[uuid.UUID]*model.Document, error) {
+
+	if len(ids) == 0 {
+		return nil, nil
+	}
+
+	query := `
+		SELECT
+			id,
+			owner_id,
+			title,
+			original_filename,
+			s3_key,
+			is_public,
+			file_size,
+			mime_type,
+			token_count,
+			created_at,
+			updated_at
+		FROM documents
+		WHERE id = ANY($1)
+	`
+
+	rows, err := r.db.Query(ctx, query, ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	result := make(map[uuid.UUID]*model.Document)
+
+	for rows.Next() {
+		var doc model.Document
+
+		err := rows.Scan(
+			&doc.ID,
+			&doc.OwnerID,
+			&doc.Title,
+			&doc.OriginalFilename,
+			&doc.S3Key,
+			&doc.IsPublic,
+			&doc.FileSize,
+			&doc.MimeType,
+			&doc.TokenCount,
+			&doc.CreatedAt,
+			&doc.UpdatedAt,
+		)
+		if err != nil {
+			return nil, err
+		}
+
+		result[doc.ID] = &doc
+	}
+
+	return result, rows.Err()
+}
+
 // ListByOwner возвращает список документов пользователя,
 // отсортированный по дате создания (новые сверху).
 //

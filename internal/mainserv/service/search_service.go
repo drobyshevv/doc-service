@@ -12,6 +12,7 @@ import (
 	"github.com/drobyshevv/doc-service/internal/mainserv/model"
 	"github.com/drobyshevv/doc-service/internal/mainserv/search/tokenizer"
 	"github.com/drobyshevv/doc-service/internal/mainserv/storage/postgres"
+	redisstorage "github.com/drobyshevv/doc-service/internal/mainserv/storage/redis"
 )
 
 const (
@@ -28,6 +29,7 @@ var (
 type SearchService struct {
 	searchRepo *postgres.SearchRepository
 	docRepo    *postgres.DocumentRepository
+	redis      *redisstorage.Client
 }
 
 type SearchResult struct {
@@ -38,10 +40,12 @@ type SearchResult struct {
 func NewSearchService(
 	searchRepo *postgres.SearchRepository,
 	docRepo *postgres.DocumentRepository,
+	redisClient *redisstorage.Client,
 ) *SearchService {
 	return &SearchService{
 		searchRepo: searchRepo,
 		docRepo:    docRepo,
+		redis:      redisClient,
 	}
 }
 
@@ -74,6 +78,7 @@ func normalizeLimit(limit int) int {
 	return limit
 }
 
+/*
 // aggregateResults преобразует map documentID -> score
 // в отсортированный список SearchResult.
 //
@@ -110,6 +115,7 @@ func aggregateResults(
 
 	return results, nil
 }
+*/
 
 // Search выполняет полнотекстовый поиск документов по поисковому запросу.
 //
@@ -135,6 +141,8 @@ func (s *SearchService) Search(
 	limit = normalizeLimit(limit)
 
 	terms := tokenizer.Tokenize(query)
+	terms = uniqueTerms(terms)
+
 	if len(terms) > maxTerms {
 		terms = terms[:maxTerms]
 	}
@@ -145,6 +153,7 @@ func (s *SearchService) Search(
 	}
 
 	documentScores := make(map[uuid.UUID]float64)
+	docSet := make(map[uuid.UUID]struct{})
 
 	for _, term := range terms {
 
@@ -153,34 +162,57 @@ func (s *SearchService) Search(
 			return nil, err
 		}
 
-		docsWithTerm, err := s.searchRepo.GetDocumentFrequency(ctx, term)
-		if err != nil {
-			continue
-		}
-
-		if docsWithTerm == 0 {
-			continue
-		}
-
-		for _, posting := range postings {
-
-			doc, err := s.docRepo.GetByID(ctx, posting.DocumentID)
-			if err != nil {
-				continue
-			}
+		for _, p := range postings {
+			docSet[p.DocumentID] = struct{}{}
 
 			score := calcScore(
-				posting.TermFrequency,
-				docsWithTerm,
+				p.TermFrequency,
+				p.DocumentFrequency,
 				totalDocs,
-				doc.TokenCount,
+				0,
 			)
 
-			documentScores[posting.DocumentID] += score
+			documentScores[p.DocumentID] += score
 		}
 	}
 
-	return aggregateResults(documentScores, s.docRepo, ctx, limit)
+	docIDs := make([]uuid.UUID, 0, len(docSet))
+	for id := range docSet {
+		docIDs = append(docIDs, id)
+	}
+
+	docs, err := s.docRepo.GetByIDs(ctx, docIDs)
+	if err != nil {
+		return nil, err
+	}
+
+	results := make([]SearchResult, 0, len(documentScores))
+
+	for id, score := range documentScores {
+		doc := docs[id]
+		if doc == nil {
+			continue
+		}
+
+		if doc.TokenCount > 0 {
+			score = score / math.Sqrt(float64(doc.TokenCount))
+		}
+
+		results = append(results, SearchResult{
+			Document: doc,
+			Score:    score,
+		})
+	}
+
+	sort.Slice(results, func(i, j int) bool {
+		return results[i].Score > results[j].Score
+	})
+
+	if len(results) > limit {
+		results = results[:limit]
+	}
+
+	return results, nil
 }
 
 // SearchByOwner выполняет полнотекстовый поиск
@@ -244,40 +276,64 @@ func (s *SearchService) SearchPhrase(
 		return nil, err
 	}
 
-	documentScores := make(map[uuid.UUID]float64)
-
 	postings, err := s.searchRepo.SearchPhrase(ctx, terms)
 	if err != nil {
 		return nil, err
 	}
 
-	for _, posting := range postings {
+	documentScores := make(map[uuid.UUID]float64)
+	docSet := make(map[uuid.UUID]struct{})
 
-		doc, err := s.docRepo.GetByID(ctx, posting.DocumentID)
-		if err != nil {
+	for _, p := range postings {
+		docSet[p.DocumentID] = struct{}{}
+
+		score := calcScore(
+			p.TermFrequency,
+			p.DocumentFrequency,
+			totalDocs,
+			0,
+		)
+
+		documentScores[p.DocumentID] += score
+	}
+
+	docIDs := make([]uuid.UUID, 0, len(docSet))
+	for id := range docSet {
+		docIDs = append(docIDs, id)
+	}
+
+	docs, err := s.docRepo.GetByIDs(ctx, docIDs)
+	if err != nil {
+		return nil, err
+	}
+
+	results := make([]SearchResult, 0, len(documentScores))
+
+	for id, score := range documentScores {
+		doc := docs[id]
+		if doc == nil {
 			continue
 		}
 
-		score := 0.0
-
-		for _, term := range terms {
-			df, err := s.searchRepo.GetDocumentFrequency(ctx, term)
-			if err != nil || df == 0 {
-				continue
-			}
-
-			score += calcScore(
-				posting.TermFrequency,
-				df,
-				totalDocs,
-				doc.TokenCount,
-			)
+		if doc.TokenCount > 0 {
+			score = score / math.Sqrt(float64(doc.TokenCount))
 		}
 
-		documentScores[posting.DocumentID] += score
+		results = append(results, SearchResult{
+			Document: doc,
+			Score:    score,
+		})
 	}
 
-	return aggregateResults(documentScores, s.docRepo, ctx, limit)
+	sort.Slice(results, func(i, j int) bool {
+		return results[i].Score > results[j].Score
+	})
+
+	if len(results) > limit {
+		results = results[:limit]
+	}
+
+	return results, nil
 }
 
 // Suggest возвращает список терминов,
