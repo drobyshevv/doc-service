@@ -2,10 +2,14 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"log"
 	"math"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -140,6 +144,16 @@ func (s *SearchService) Search(
 
 	limit = normalizeLimit(limit)
 
+	cacheKey := fmt.Sprintf("search:%s:%d", query, limit)
+
+	cached, err := s.redis.Get(ctx, cacheKey)
+	if err == nil && len(cached) > 0 {
+		var results []SearchResult
+		if json.Unmarshal([]byte(cached), &results) == nil {
+			return results, nil
+		}
+	}
+
 	terms := tokenizer.Tokenize(query)
 	terms = uniqueTerms(terms)
 
@@ -156,7 +170,6 @@ func (s *SearchService) Search(
 	docSet := make(map[uuid.UUID]struct{})
 
 	for _, term := range terms {
-
 		postings, err := s.searchRepo.SearchByTerm(ctx, term)
 		if err != nil {
 			return nil, err
@@ -210,6 +223,12 @@ func (s *SearchService) Search(
 
 	if len(results) > limit {
 		results = results[:limit]
+	}
+
+	bytes, _ := json.Marshal(results)
+	err = s.redis.Set(ctx, cacheKey, bytes, 5*time.Minute)
+	if err != nil {
+		log.Println("REDIS SET ERROR:", err)
 	}
 
 	return results, nil

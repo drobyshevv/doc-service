@@ -9,11 +9,11 @@ COPY . .
 
 # service
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
-    go build -o mainserv ./cmd/mainserv/server
+    go build -o auth-service ./cmd/auth/server
 
 # migrator
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
-    go build -o mainserv-migrator ./cmd/mainserv/migrator
+    go build -o auth-migrator ./cmd/auth/migrator
 
 
 FROM alpine:latest
@@ -22,12 +22,12 @@ WORKDIR /app
 
 RUN apk --no-cache add ca-certificates
 
-COPY --from=builder /app/mainserv .
-COPY --from=builder /app/mainserv-migrator .
+COPY --from=builder /app/auth-service .
+COPY --from=builder /app/auth-migrator .
 
 COPY configs ./configs
 COPY migrations ./migrations
 
-EXPOSE 8081
+EXPOSE 8082
 
-CMD ["./mainserv"]
+CMD ["./auth-service"]

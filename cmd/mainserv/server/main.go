@@ -15,6 +15,7 @@ import (
 	"github.com/drobyshevv/doc-service/internal/mainserv/handler"
 	"github.com/drobyshevv/doc-service/internal/mainserv/service"
 	"github.com/drobyshevv/doc-service/internal/mainserv/storage/postgres"
+	redisstorage "github.com/drobyshevv/doc-service/internal/mainserv/storage/redis"
 	s3storage "github.com/drobyshevv/doc-service/internal/mainserv/storage/s3"
 )
 
@@ -52,6 +53,17 @@ func main() {
 
 	storage := s3storage.NewStorage(s3Client)
 
+	redisClient := redisstorage.NewClient(config.RedisConfig{
+		Host:     cfg.Redis.Host,
+		Port:     cfg.Redis.Port,
+		Password: cfg.Redis.Password,
+		DB:       cfg.Redis.DB,
+	})
+
+	if err := redisClient.Ping(context.Background()); err != nil {
+		log.Fatalf("redis not available: %v", err)
+	}
+
 	documentRepo := postgres.NewDocumentRepository(db)
 	searchRepo := postgres.NewSearchRepository(db)
 
@@ -64,6 +76,7 @@ func main() {
 	searchService := service.NewSearchService(
 		searchRepo,
 		documentRepo,
+		redisClient,
 	)
 
 	documentHandler := handler.NewDocumentHandler(documentService)

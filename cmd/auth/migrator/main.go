@@ -1,3 +1,10 @@
+// Command migrate управляет миграциями базы данных.
+//
+// Поддерживаемые команды:
+//   - up
+//   - down
+//   - step N
+//   - force N
 package main
 
 import (
@@ -5,7 +12,7 @@ import (
 	"os"
 	"strconv"
 
-	"github.com/drobyshevv/doc-service/internal/mainserv/config"
+	"github.com/drobyshevv/doc-service/internal/auth/config"
 	"github.com/golang-migrate/migrate/v4"
 	_ "github.com/golang-migrate/migrate/v4/database/postgres"
 	_ "github.com/golang-migrate/migrate/v4/source/file"
