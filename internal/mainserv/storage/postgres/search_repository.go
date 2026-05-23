@@ -375,3 +375,36 @@ func (r *SearchRepository) GetDocumentFrequency(
 
 	return df, nil
 }
+
+func (r *SearchRepository) GetPositionsByPosting(
+	ctx context.Context,
+	postingID int64,
+) ([]int, error) {
+
+	query := `
+		SELECT position
+		FROM term_positions
+		WHERE posting_id = $1
+		ORDER BY position
+	`
+
+	rows, err := r.db.Query(ctx, query, postingID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var positions []int
+
+	for rows.Next() {
+		var pos int
+
+		if err := rows.Scan(&pos); err != nil {
+			return nil, err
+		}
+
+		positions = append(positions, pos)
+	}
+
+	return positions, rows.Err()
+}

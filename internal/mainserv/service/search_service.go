@@ -283,41 +283,85 @@ func (s *SearchService) SearchPhrase(
 		return []SearchResult{}, err
 	}
 
-	limit = normalizeLimit(limit)
-
 	terms := tokenizer.Tokenize(query)
 	if len(terms) < 2 {
 		return s.Search(ctx, query, limit)
 	}
+
+	limit = normalizeLimit(limit)
 
 	totalDocs, err := s.searchRepo.CountDocuments(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	postings, err := s.searchRepo.SearchPhrase(ctx, terms)
-	if err != nil {
-		return nil, err
+	postingsByTerm := make([][]model.SearchPosting, len(terms))
+
+	for i, term := range terms {
+		postings, err := s.searchRepo.SearchByTerm(ctx, term)
+		if err != nil {
+			return nil, err
+		}
+		postingsByTerm[i] = postings
+	}
+
+	docMap := make(map[uuid.UUID][]model.SearchPosting)
+
+	for _, postings := range postingsByTerm {
+		for _, p := range postings {
+			docMap[p.DocumentID] = append(
+				docMap[p.DocumentID],
+				p,
+			)
+		}
 	}
 
 	documentScores := make(map[uuid.UUID]float64)
-	docSet := make(map[uuid.UUID]struct{})
 
-	for _, p := range postings {
-		docSet[p.DocumentID] = struct{}{}
+	for docID, postings := range docMap {
 
-		score := calcScore(
-			p.TermFrequency,
-			p.DocumentFrequency,
-			totalDocs,
-			0,
-		)
+		if len(postings) != len(terms) {
+			continue
+		}
 
-		documentScores[p.DocumentID] += score
+		var allPositions [][]int
+
+		for _, p := range postings {
+
+			positions, err := s.searchRepo.GetPositionsByPosting(
+				ctx,
+				p.ID,
+			)
+			if err != nil {
+				return nil, err
+			}
+
+			allPositions = append(
+				allPositions,
+				positions,
+			)
+		}
+
+		if !isPhraseMatch(allPositions) {
+			continue
+		}
+
+		score := 0.0
+
+		for _, p := range postings {
+			score += calcScore(
+				p.TermFrequency,
+				p.DocumentFrequency,
+				totalDocs,
+				0,
+			)
+		}
+
+		documentScores[docID] = score
 	}
 
-	docIDs := make([]uuid.UUID, 0, len(docSet))
-	for id := range docSet {
+	docIDs := make([]uuid.UUID, 0, len(documentScores))
+	for id := range documentScores {
 		docIDs = append(docIDs, id)
 	}
 
@@ -326,16 +370,19 @@ func (s *SearchService) SearchPhrase(
 		return nil, err
 	}
 
-	results := make([]SearchResult, 0, len(documentScores))
+	results := make([]SearchResult, 0)
 
 	for id, score := range documentScores {
+
 		doc := docs[id]
 		if doc == nil {
 			continue
 		}
 
 		if doc.TokenCount > 0 {
-			score = score / math.Sqrt(float64(doc.TokenCount))
+			score /= math.Sqrt(
+				float64(doc.TokenCount),
+			)
 		}
 
 		results = append(results, SearchResult{
@@ -416,4 +463,45 @@ func uniqueTerms(terms []string) []string {
 	}
 
 	return res
+}
+
+func isPhraseMatch(
+	allPositions [][]int,
+) bool {
+
+	if len(allPositions) == 0 {
+		return false
+	}
+
+	first := allPositions[0]
+
+	for _, start := range first {
+
+		match := true
+		current := start
+
+		for i := 1; i < len(allPositions); i++ {
+
+			found := false
+
+			for _, pos := range allPositions[i] {
+				if pos == current+1 {
+					found = true
+					current = pos
+					break
+				}
+			}
+
+			if !found {
+				match = false
+				break
+			}
+		}
+
+		if match {
+			return true
+		}
+	}
+
+	return false
 }
