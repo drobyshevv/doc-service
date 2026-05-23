@@ -127,6 +127,20 @@ services:
     ports:
       - "8081:8081"
 
+  gateway:
+    build:
+      context: .
+      dockerfile: deployments/docker/gateway.Dockerfile
+    container_name: docservice-gateway
+    restart: always
+    depends_on:
+      auth:
+        condition: service_started
+      mainserv:
+        condition: service_started
+    ports:
+      - "8080:8080"
+
 volumes:
   postgres_auth_data:
   postgres_main_data:
