@@ -124,3 +124,32 @@ func (h *SearchHandler) Suggest(
 
 	json.NewEncoder(w).Encode(results)
 }
+
+// SearchPhraseByOwner обрабатывает HTTP-запрос на поиск точной фразы
+// среди документов конкретного пользователя.
+func (h *SearchHandler) SearchPhraseByOwner(
+	w http.ResponseWriter,
+	r *http.Request,
+) {
+	query := r.URL.Query().Get("query")
+	owner := r.URL.Query().Get("owner_id")
+
+	ownerID, err := uuid.Parse(owner)
+	if err != nil {
+		http.Error(w, "invalid owner_id", http.StatusBadRequest)
+		return
+	}
+
+	results, err := h.searchService.SearchPhraseByOwner(
+		r.Context(),
+		ownerID,
+		query,
+		20,
+	)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	json.NewEncoder(w).Encode(results)
+}

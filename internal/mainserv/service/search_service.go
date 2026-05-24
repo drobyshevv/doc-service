@@ -54,27 +54,18 @@ func NewSearchService(
 }
 
 // normalizeQuery выполняет предварительную обработку поискового запроса.
-//
-// Удаляет лишние пробелы и проверяет ограничения
-// на максимальную длину запроса.
 func normalizeQuery(query string) (string, error) {
 	query = strings.TrimSpace(query)
-
 	if query == "" {
 		return "", nil
 	}
-
 	if len(query) > maxQueryLength {
 		return "", ErrQueryTooLong
 	}
-
 	return query, nil
 }
 
 // normalizeLimit валидирует ограничение количества результатов.
-//
-// Если limit выходит за допустимые пределы,
-// возвращается значение по умолчанию.
 func normalizeLimit(limit int) int {
 	if limit <= 0 || limit > maxLimit {
 		return defaultLimit
@@ -82,56 +73,10 @@ func normalizeLimit(limit int) int {
 	return limit
 }
 
-/*
-// aggregateResults преобразует map documentID -> score
-// в отсортированный список SearchResult.
-//
-// Для каждого документа загружаются метаданные,
-// после чего результаты сортируются по релевантности.
-func aggregateResults(
-	documentScores map[uuid.UUID]float64,
-	docRepo *postgres.DocumentRepository,
-	ctx context.Context,
-	limit int,
-) ([]SearchResult, error) {
-
-	results := make([]SearchResult, 0, len(documentScores))
-
-	for docID, score := range documentScores {
-		doc, err := docRepo.GetByID(ctx, docID)
-		if err != nil {
-			continue
-		}
-
-		results = append(results, SearchResult{
-			Document: doc,
-			Score:    score,
-		})
-	}
-
-	sort.Slice(results, func(i, j int) bool {
-		return results[i].Score > results[j].Score
-	})
-
-	if len(results) > limit {
-		results = results[:limit]
-	}
-
-	return results, nil
-}
-*/
-
-// Search выполняет полнотекстовый поиск документов по поисковому запросу.
-//
-// Алгоритм работы:
-//   - нормализует и валидирует входной запрос;
-//   - разбивает запрос на термины;
-//   - выполняет поиск postings для каждого термина;
-//   - агрегирует TF-IDF score по документам;
-//   - сортирует результаты по убыванию релевантности.
-//
-// Возвращает список документов, наиболее релевантных запросу.
-func (s *SearchService) Search(
+// searchRaw выполняет полнотекстовый поиск без фильтрации по доступу.
+// Возвращает все найденные документы (публичные и приватные).
+// Используется как основа для Search и SearchByOwner.
+func (s *SearchService) searchRaw(
 	ctx context.Context,
 	query string,
 	limit int,
@@ -141,11 +86,9 @@ func (s *SearchService) Search(
 	if err != nil || query == "" {
 		return []SearchResult{}, err
 	}
-
 	limit = normalizeLimit(limit)
 
-	cacheKey := fmt.Sprintf("search:%s:%d", query, limit)
-
+	cacheKey := fmt.Sprintf("searchraw:%s:%d", query, limit)
 	cached, err := s.redis.Get(ctx, cacheKey)
 	if err == nil && len(cached) > 0 {
 		var results []SearchResult
@@ -156,7 +99,6 @@ func (s *SearchService) Search(
 
 	terms := tokenizer.Tokenize(query)
 	terms = uniqueTerms(terms)
-
 	if len(terms) > maxTerms {
 		terms = terms[:maxTerms]
 	}
@@ -174,17 +116,9 @@ func (s *SearchService) Search(
 		if err != nil {
 			return nil, err
 		}
-
 		for _, p := range postings {
 			docSet[p.DocumentID] = struct{}{}
-
-			score := calcScore(
-				p.TermFrequency,
-				p.DocumentFrequency,
-				totalDocs,
-				0,
-			)
-
+			score := calcScore(p.TermFrequency, p.DocumentFrequency, totalDocs, 0)
 			documentScores[p.DocumentID] += score
 		}
 	}
@@ -200,17 +134,14 @@ func (s *SearchService) Search(
 	}
 
 	results := make([]SearchResult, 0, len(documentScores))
-
 	for id, score := range documentScores {
 		doc := docs[id]
 		if doc == nil {
 			continue
 		}
-
 		if doc.TokenCount > 0 {
 			score = score / math.Sqrt(float64(doc.TokenCount))
 		}
-
 		results = append(results, SearchResult{
 			Document: doc,
 			Score:    score,
@@ -226,53 +157,17 @@ func (s *SearchService) Search(
 	}
 
 	bytes, _ := json.Marshal(results)
-	err = s.redis.Set(ctx, cacheKey, bytes, 5*time.Minute)
-	if err != nil {
+	if err := s.redis.Set(ctx, cacheKey, bytes, 5*time.Minute); err != nil {
 		log.Println("REDIS SET ERROR:", err)
 	}
 
 	return results, nil
 }
 
-// SearchByOwner выполняет полнотекстовый поиск
-// только среди документов конкретного пользователя.
-//
-// Метод использует базовый Search,
-// после чего фильтрует результаты по ownerID.
-//
-// Применяется для поиска по приватным документам пользователя.
-func (s *SearchService) SearchByOwner(
-	ctx context.Context,
-	ownerID uuid.UUID,
-	query string,
-	limit int,
-) ([]SearchResult, error) {
-
-	results, err := s.Search(ctx, query, limit)
-	if err != nil {
-		return nil, err
-	}
-
-	filtered := make([]SearchResult, 0)
-
-	for _, result := range results {
-		if result.Document.OwnerID == ownerID {
-			filtered = append(filtered, result)
-		}
-	}
-
-	return filtered, nil
-}
-
-// SearchPhrase выполняет поиск точной фразы.
-//
-// В отличие от стандартного поиска,
-// учитывает последовательность терминов в запросе
-// и возвращает документы, содержащие искомую фразу.
-//
-// Используется для более точного поиска
-// по нескольким связанным словам.
-func (s *SearchService) SearchPhrase(
+// searchPhraseRaw выполняет поиск точной фразы без фильтрации по доступу.
+// Возвращает все найденные документы (публичные и приватные).
+// Используется как основа для SearchPhrase и SearchPhraseByOwner.
+func (s *SearchService) searchPhraseRaw(
 	ctx context.Context,
 	query string,
 	limit int,
@@ -283,20 +178,30 @@ func (s *SearchService) SearchPhrase(
 		return []SearchResult{}, err
 	}
 
+	cacheKey := fmt.Sprintf("searchphrase:%s:%d", query, limit)
+
+	cached, err := s.redis.Get(ctx, cacheKey)
+	if err == nil && len(cached) > 0 {
+		var results []SearchResult
+		if json.Unmarshal([]byte(cached), &results) == nil {
+			return results, nil
+		}
+	}
+
 	terms := tokenizer.Tokenize(query)
 	if len(terms) < 2 {
-		return s.Search(ctx, query, limit)
+		// Для одиночных терминов делегируем searchRaw
+		return s.searchRaw(ctx, query, limit)
 	}
 
 	limit = normalizeLimit(limit)
-
 	totalDocs, err := s.searchRepo.CountDocuments(ctx)
 	if err != nil {
 		return nil, err
 	}
 
+	// Собираем postings для каждого термина
 	postingsByTerm := make([][]model.SearchPosting, len(terms))
-
 	for i, term := range terms {
 		postings, err := s.searchRepo.SearchByTerm(ctx, term)
 		if err != nil {
@@ -305,41 +210,28 @@ func (s *SearchService) SearchPhrase(
 		postingsByTerm[i] = postings
 	}
 
+	// Группируем postings по documentID
 	docMap := make(map[uuid.UUID][]model.SearchPosting)
-
 	for _, postings := range postingsByTerm {
 		for _, p := range postings {
-			docMap[p.DocumentID] = append(
-				docMap[p.DocumentID],
-				p,
-			)
+			docMap[p.DocumentID] = append(docMap[p.DocumentID], p)
 		}
 	}
 
 	documentScores := make(map[uuid.UUID]float64)
 
 	for docID, postings := range docMap {
-
 		if len(postings) != len(terms) {
 			continue
 		}
 
 		var allPositions [][]int
-
 		for _, p := range postings {
-
-			positions, err := s.searchRepo.GetPositionsByPosting(
-				ctx,
-				p.ID,
-			)
+			positions, err := s.searchRepo.GetPositionsByPosting(ctx, p.ID)
 			if err != nil {
 				return nil, err
 			}
-
-			allPositions = append(
-				allPositions,
-				positions,
-			)
+			allPositions = append(allPositions, positions)
 		}
 
 		if !isPhraseMatch(allPositions) {
@@ -347,16 +239,9 @@ func (s *SearchService) SearchPhrase(
 		}
 
 		score := 0.0
-
 		for _, p := range postings {
-			score += calcScore(
-				p.TermFrequency,
-				p.DocumentFrequency,
-				totalDocs,
-				0,
-			)
+			score += calcScore(p.TermFrequency, p.DocumentFrequency, totalDocs, 0)
 		}
-
 		documentScores[docID] = score
 	}
 
@@ -371,20 +256,14 @@ func (s *SearchService) SearchPhrase(
 	}
 
 	results := make([]SearchResult, 0)
-
 	for id, score := range documentScores {
-
 		doc := docs[id]
 		if doc == nil {
 			continue
 		}
-
 		if doc.TokenCount > 0 {
-			score /= math.Sqrt(
-				float64(doc.TokenCount),
-			)
+			score /= math.Sqrt(float64(doc.TokenCount))
 		}
-
 		results = append(results, SearchResult{
 			Document: doc,
 			Score:    score,
@@ -399,14 +278,111 @@ func (s *SearchService) SearchPhrase(
 		results = results[:limit]
 	}
 
+	bytes, err := json.Marshal(results)
+	if err == nil {
+		// TTL 5 минут, как и в searchRaw
+		if err := s.redis.Set(ctx, cacheKey, bytes, 5*time.Minute); err != nil {
+			log.Println("REDIS SET ERROR:", err)
+		}
+	}
+
 	return results, nil
 }
 
-// Suggest возвращает список терминов,
-// начинающихся с указанного префикса.
-//
-// Используется для реализации autocomplete
-// и поисковых подсказок при вводе запроса.
+// Search выполняет полнотекстовый поиск только по публичным документам.
+// Возвращает документы с IsPublic = true, отсортированные по релевантности.
+func (s *SearchService) Search(
+	ctx context.Context,
+	query string,
+	limit int,
+) ([]SearchResult, error) {
+
+	results, err := s.searchRaw(ctx, query, limit)
+	if err != nil {
+		return nil, err
+	}
+
+	filtered := make([]SearchResult, 0, len(results))
+	for _, res := range results {
+		if res.Document.IsPublic {
+			filtered = append(filtered, res)
+		}
+	}
+	return filtered, nil
+}
+
+// SearchByOwner выполняет полнотекстовый поиск среди документов конкретного пользователя.
+// Возвращает как публичные, так и приватные документы указанного владельца.
+func (s *SearchService) SearchByOwner(
+	ctx context.Context,
+	ownerID uuid.UUID,
+	query string,
+	limit int,
+) ([]SearchResult, error) {
+
+	results, err := s.searchRaw(ctx, query, limit)
+	if err != nil {
+		return nil, err
+	}
+
+	filtered := make([]SearchResult, 0)
+	for _, res := range results {
+		if res.Document.OwnerID == ownerID {
+			filtered = append(filtered, res)
+		}
+	}
+	return filtered, nil
+}
+
+// SearchPhrase выполняет поиск точной фразы по всем документам.
+// Возвращает как публичные, так и приватные документы.
+// Для ограничения доступа к приватным документам используйте SearchPhraseByOwner
+// или выполняйте фильтрацию на уровне handler.
+func (s *SearchService) SearchPhrase(
+	ctx context.Context,
+	query string,
+	limit int,
+) ([]SearchResult, error) {
+
+	results, err := s.searchPhraseRaw(ctx, query, limit)
+	if err != nil {
+		return nil, err
+	}
+
+	// 🔥 Фильтр: только публичные документы
+	filtered := make([]SearchResult, 0, len(results))
+	for _, res := range results {
+		if res.Document.IsPublic {
+			filtered = append(filtered, res)
+		}
+	}
+	return filtered, nil
+}
+
+// SearchPhraseByOwner выполняет поиск точной фразы среди документов конкретного пользователя.
+// Возвращает как публичные, так и приватные документы указанного владельца.
+func (s *SearchService) SearchPhraseByOwner(
+	ctx context.Context,
+	ownerID uuid.UUID,
+	query string,
+	limit int,
+) ([]SearchResult, error) {
+
+	results, err := s.searchPhraseRaw(ctx, query, limit)
+	if err != nil {
+		return nil, err
+	}
+
+	filtered := make([]SearchResult, 0)
+	for _, res := range results {
+		if res.Document.OwnerID == ownerID {
+			filtered = append(filtered, res)
+		}
+	}
+	return filtered, nil
+}
+
+// Suggest возвращает список терминов, начинающихся с указанного префикса.
 func (s *SearchService) Suggest(
 	ctx context.Context,
 	prefix string,
@@ -417,39 +393,25 @@ func (s *SearchService) Suggest(
 	if err != nil || prefix == "" {
 		return []string{}, err
 	}
-
 	limit = normalizeLimit(limit)
-
 	return s.searchRepo.SuggestTerms(ctx, prefix, limit)
 }
 
-func calcScore(
-	tf int,
-	docsWithTerm int,
-	totalDocs int,
-	docLength int,
-) float64 {
-
+// calcScore вычисляет TF-IDF score с нормализацией по длине документа.
+func calcScore(tf int, docsWithTerm int, totalDocs int, docLength int) float64 {
 	tfNorm := 1 + math.Log(float64(tf))
-
-	idf := math.Log(
-		(float64(totalDocs) + 1) /
-			(float64(docsWithTerm) + 1),
-	)
-
+	idf := math.Log((float64(totalDocs) + 1) / (float64(docsWithTerm) + 1))
 	score := tfNorm * idf
-
 	if docLength > 0 {
 		score = score / math.Sqrt(float64(docLength))
 	}
-
 	return score
 }
 
+// uniqueTerms удаляет дубликаты из списка терминов.
 func uniqueTerms(terms []string) []string {
 	seen := make(map[string]struct{})
 	res := make([]string, 0, len(terms))
-
 	for _, t := range terms {
 		if _, ok := seen[t]; ok {
 			continue
@@ -457,33 +419,23 @@ func uniqueTerms(terms []string) []string {
 		seen[t] = struct{}{}
 		res = append(res, t)
 	}
-
 	if len(res) > maxTerms {
 		return res[:maxTerms]
 	}
-
 	return res
 }
 
-func isPhraseMatch(
-	allPositions [][]int,
-) bool {
-
+// isPhraseMatch проверяет, встречаются ли термины в документе в заданном порядке.
+func isPhraseMatch(allPositions [][]int) bool {
 	if len(allPositions) == 0 {
 		return false
 	}
-
 	first := allPositions[0]
-
 	for _, start := range first {
-
 		match := true
 		current := start
-
 		for i := 1; i < len(allPositions); i++ {
-
 			found := false
-
 			for _, pos := range allPositions[i] {
 				if pos == current+1 {
 					found = true
@@ -491,17 +443,14 @@ func isPhraseMatch(
 					break
 				}
 			}
-
 			if !found {
 				match = false
 				break
 			}
 		}
-
 		if match {
 			return true
 		}
 	}
-
 	return false
 }
