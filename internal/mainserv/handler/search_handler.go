@@ -87,6 +87,23 @@ func (h *SearchHandler) SearchByOwner(
 		return
 	}
 
+	userIDStr := r.Header.Get("X-User-ID")
+	if userIDStr == "" {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		http.Error(w, "invalid user header", http.StatusInternalServerError)
+		return
+	}
+
+	if ownerID != userID {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+
 	results, err := h.searchService.SearchByOwner(
 		r.Context(),
 		ownerID,
@@ -137,6 +154,23 @@ func (h *SearchHandler) SearchPhraseByOwner(
 	ownerID, err := uuid.Parse(owner)
 	if err != nil {
 		http.Error(w, "invalid owner_id", http.StatusBadRequest)
+		return
+	}
+
+	userIDStr := r.Header.Get("X-User-ID")
+	if userIDStr == "" {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		http.Error(w, "invalid user header", http.StatusInternalServerError)
+		return
+	}
+
+	if ownerID != userID {
+		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
 

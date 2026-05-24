@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"mime"
 	"path/filepath"
 
@@ -9,6 +10,7 @@ import (
 	"github.com/drobyshevv/doc-service/internal/mainserv/search/indexer"
 	"github.com/drobyshevv/doc-service/internal/mainserv/search/tokenizer"
 	"github.com/drobyshevv/doc-service/internal/mainserv/storage/postgres"
+	redisstorage "github.com/drobyshevv/doc-service/internal/mainserv/storage/redis"
 	s3storage "github.com/drobyshevv/doc-service/internal/mainserv/storage/s3"
 	"github.com/google/uuid"
 )
@@ -17,17 +19,20 @@ type DocumentService struct {
 	docRepo    *postgres.DocumentRepository
 	searchRepo *postgres.SearchRepository
 	s3Storage  *s3storage.Storage
+	redis      *redisstorage.Client
 }
 
 func NewDocumentService(
 	docRepo *postgres.DocumentRepository,
 	searchRepo *postgres.SearchRepository,
 	s3Storage *s3storage.Storage,
+	redisClient *redisstorage.Client,
 ) *DocumentService {
 	return &DocumentService{
 		docRepo:    docRepo,
 		searchRepo: searchRepo,
 		s3Storage:  s3Storage,
+		redis:      redisClient,
 	}
 }
 
@@ -94,6 +99,8 @@ func (s *DocumentService) UploadDocument(
 	if err != nil {
 		return nil, err
 	}
+
+	s.invalidateSearchCache(ctx, string(input.Data))
 
 	return doc, nil
 }
@@ -178,4 +185,37 @@ func (s *DocumentService) DeleteDocument(
 	}
 
 	return nil
+}
+
+// invalidateSearchCache удаляет ключи кеша поиска по терминам документа.
+func (s *DocumentService) invalidateSearchCache(ctx context.Context, text string) {
+	terms := tokenizer.Tokenize(text)
+	terms = uniqueTermsForCache(terms)
+
+	for _, term := range terms {
+		// Инвалидируем для основных лимитов
+		for _, limit := range []int{20, 50, 100} {
+			key := fmt.Sprintf("searchraw:%s:%d", term, limit)
+			_ = s.redis.Delete(ctx, key)
+
+			keyPhrase := fmt.Sprintf("searchphrase:%s:%d", term, limit)
+			_ = s.redis.Delete(ctx, keyPhrase)
+		}
+	}
+}
+
+func uniqueTermsForCache(terms []string) []string {
+	seen := make(map[string]struct{})
+	res := make([]string, 0, 5)
+	for _, t := range terms {
+		if _, ok := seen[t]; ok {
+			continue
+		}
+		seen[t] = struct{}{}
+		res = append(res, t)
+		if len(res) >= 5 {
+			break
+		}
+	}
+	return res
 }

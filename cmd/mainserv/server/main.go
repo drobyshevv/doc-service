@@ -71,6 +71,7 @@ func main() {
 		documentRepo,
 		searchRepo,
 		storage,
+		redisClient,
 	)
 
 	searchService := service.NewSearchService(

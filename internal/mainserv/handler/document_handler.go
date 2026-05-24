@@ -53,9 +53,27 @@ func (h *DocumentHandler) UploadDocument(
 		return
 	}
 
-	ownerID, err := uuid.Parse(r.FormValue("owner_id"))
+	owner := r.FormValue("owner_id")
+	ownerID, err := uuid.Parse(owner)
 	if err != nil {
 		http.Error(w, "invalid owner_id", http.StatusBadRequest)
+		return
+	}
+
+	userIDStr := r.Header.Get("X-User-ID")
+	if userIDStr == "" {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		http.Error(w, "invalid user header", http.StatusInternalServerError)
+		return
+	}
+
+	if ownerID != userID {
+		http.Error(w, "forbidden: cannot upload for another user", http.StatusForbidden)
 		return
 	}
 
@@ -67,10 +85,7 @@ func (h *DocumentHandler) UploadDocument(
 		IsPublic: r.FormValue("is_public") == "true",
 	}
 
-	doc, err := h.documentService.UploadDocument(
-		r.Context(),
-		input,
-	)
+	doc, err := h.documentService.UploadDocument(r.Context(), input)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -78,7 +93,6 @@ func (h *DocumentHandler) UploadDocument(
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-
 	json.NewEncoder(w).Encode(doc)
 }
 
@@ -92,28 +106,39 @@ func (h *DocumentHandler) GetDocument(
 	r *http.Request,
 ) {
 	idParam := chi.URLParam(r, "id")
-
 	docID, err := uuid.Parse(idParam)
 	if err != nil {
 		http.Error(w, "invalid id", http.StatusBadRequest)
 		return
 	}
 
-	doc, data, err := h.documentService.GetDocument(
-		r.Context(),
-		docID,
-	)
+	doc, data, err := h.documentService.GetDocument(r.Context(), docID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusNotFound)
 		return
 	}
 
-	w.Header().Set(
-		"Content-Disposition",
-		"attachment; filename="+doc.OriginalFilename,
-	)
-	w.Header().Set("Content-Type", doc.MimeType)
+	if !doc.IsPublic {
+		userIDStr := r.Header.Get("X-User-ID")
+		if userIDStr == "" {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
 
+		userID, err := uuid.Parse(userIDStr)
+		if err != nil {
+			http.Error(w, "invalid user header", http.StatusInternalServerError)
+			return
+		}
+
+		if doc.OwnerID != userID {
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
+	}
+
+	w.Header().Set("Content-Disposition", "attachment; filename="+doc.OriginalFilename)
+	w.Header().Set("Content-Type", doc.MimeType)
 	w.Write(data)
 }
 
@@ -127,17 +152,36 @@ func (h *DocumentHandler) DeleteDocument(
 	r *http.Request,
 ) {
 	idParam := chi.URLParam(r, "id")
-
 	docID, err := uuid.Parse(idParam)
 	if err != nil {
 		http.Error(w, "invalid id", http.StatusBadRequest)
 		return
 	}
 
-	err = h.documentService.DeleteDocument(
-		r.Context(),
-		docID,
-	)
+	doc, _, err := h.documentService.GetDocument(r.Context(), docID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+
+	userIDStr := r.Header.Get("X-User-ID")
+	if userIDStr == "" {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		http.Error(w, "invalid user header", http.StatusInternalServerError)
+		return
+	}
+
+	if doc.OwnerID != userID {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+
+	err = h.documentService.DeleteDocument(r.Context(), docID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
