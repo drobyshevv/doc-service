@@ -2,8 +2,10 @@ package handler
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -182,6 +184,121 @@ func (h *DocumentHandler) DeleteDocument(
 	}
 
 	err = h.documentService.DeleteDocument(r.Context(), docID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// UploadNewVersion загружает новую версию документа.
+func (h *DocumentHandler) UploadNewVersion(w http.ResponseWriter, r *http.Request) {
+	docID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		http.Error(w, "invalid id", http.StatusBadRequest)
+		return
+	}
+
+	userID, err := uuid.Parse(r.Header.Get("X-User-ID"))
+	if err != nil {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	err = r.ParseMultipartForm(10 << 20)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	defer file.Close()
+
+	data, _ := io.ReadAll(file)
+	note := r.FormValue("note") // опциональный комментарий
+
+	version, err := h.documentService.UploadNewVersion(
+		r.Context(), docID, userID, data, header.Filename, note,
+	)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(version)
+}
+
+// ListVersions получает список версий документа.
+func (h *DocumentHandler) ListVersions(w http.ResponseWriter, r *http.Request) {
+	docID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		http.Error(w, "invalid id", http.StatusBadRequest)
+		return
+	}
+
+	versions, err := h.documentService.ListDocumentVersions(r.Context(), docID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(versions)
+}
+
+// GetVersion скачивает конкретную версию документа.
+func (h *DocumentHandler) GetVersion(w http.ResponseWriter, r *http.Request) {
+	docID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		http.Error(w, "invalid id", http.StatusBadRequest)
+		return
+	}
+
+	versionNum, err := strconv.Atoi(chi.URLParam(r, "version"))
+	if err != nil {
+		http.Error(w, "invalid version", http.StatusBadRequest)
+		return
+	}
+
+	ver, data, err := h.documentService.GetDocumentVersion(r.Context(), docID, versionNum)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=v%d-%s", ver.Version, ver.S3Key))
+	w.Header().Set("Content-Type", ver.MimeType)
+	w.Write(data)
+}
+
+// RollbackVersion откатывает к предыдущей версии документа.
+func (h *DocumentHandler) RollbackVersion(w http.ResponseWriter, r *http.Request) {
+	docID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		http.Error(w, "invalid id", http.StatusBadRequest)
+		return
+	}
+
+	userID, err := uuid.Parse(r.Header.Get("X-User-ID"))
+	if err != nil {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	versionNum, err := strconv.Atoi(chi.URLParam(r, "version"))
+	if err != nil {
+		http.Error(w, "invalid version", http.StatusBadRequest)
+		return
+	}
+
+	err = h.documentService.RollbackToVersion(r.Context(), docID, versionNum, userID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

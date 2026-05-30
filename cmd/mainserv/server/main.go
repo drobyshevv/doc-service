@@ -91,6 +91,11 @@ func main() {
 		r.Post("/upload", documentHandler.UploadDocument)
 		r.Get("/{id}", documentHandler.GetDocument)
 		r.Delete("/{id}", documentHandler.DeleteDocument)
+
+		r.Post("/{id}/versions", documentHandler.UploadNewVersion)
+		r.Get("/{id}/versions", documentHandler.ListVersions)
+		r.Get("/{id}/versions/{version}", documentHandler.GetVersion)
+		r.Post("/{id}/versions/{version}/rollback", documentHandler.RollbackVersion)
 	})
 
 	router.Route("/search", func(r chi.Router) {

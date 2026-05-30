@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -258,4 +259,141 @@ func (r *DocumentRepository) Delete(
 	}
 
 	return nil
+}
+
+// CreateVersion создает новую версию документа.
+func (r *DocumentRepository) CreateVersion(
+	ctx context.Context,
+	version *model.DocumentVersion,
+) error {
+	query := `
+		INSERT INTO document_versions (
+			document_id, version, s3_key, file_size,
+			mime_type, uploaded_by, note
+		) VALUES ($1, $2, $3, $4, $5, $6, $7)
+		RETURNING id, created_at
+	`
+	return r.db.QueryRow(
+		ctx, query,
+		version.DocumentID, version.Version, version.S3Key,
+		version.FileSize, version.MimeType, version.UploadedBy, version.Note,
+	).Scan(&version.ID, &version.CreatedAt)
+}
+
+// ListVersions получает список версий документа (от новых к старым).
+func (r *DocumentRepository) ListVersions(
+	ctx context.Context,
+	docID uuid.UUID,
+) ([]model.DocumentVersion, error) {
+	query := `
+		SELECT id, document_id, version, s3_key, file_size,
+		       mime_type, uploaded_by, created_at, note
+		FROM document_versions
+		WHERE document_id = $1
+		ORDER BY version DESC
+	`
+	rows, err := r.db.Query(ctx, query, docID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var versions []model.DocumentVersion
+	for rows.Next() {
+		var v model.DocumentVersion
+		err := rows.Scan(
+			&v.ID, &v.DocumentID, &v.Version, &v.S3Key,
+			&v.FileSize, &v.MimeType, &v.UploadedBy,
+			&v.CreatedAt, &v.Note,
+		)
+		if err != nil {
+			return nil, err
+		}
+		versions = append(versions, v)
+	}
+	return versions, rows.Err()
+}
+
+// UpdateCurrentVersion обновляет текущую версию и метаданные документа.
+func (r *DocumentRepository) UpdateCurrentVersion(
+	ctx context.Context,
+	docID uuid.UUID,
+	newVersion int,
+	s3Key string,
+	filename string,
+	mimeType string,
+	fileSize int64,
+) error {
+	query := `
+		UPDATE documents 
+		SET current_version = $1, 
+		    s3_key = $2,
+		    original_filename = $3,
+		    mime_type = $4,
+		    file_size = $5,
+		    updated_at = NOW()
+		WHERE id = $6
+	`
+	_, err := r.db.Exec(ctx, query, newVersion, s3Key, filename, mimeType, fileSize, docID)
+	return err
+}
+
+// GetVersionByS3Key получает версию по S3-ключу (для скачивания).
+func (r *DocumentRepository) GetVersionByS3Key(
+	ctx context.Context,
+	s3Key string,
+) (*model.DocumentVersion, error) {
+	query := `
+		SELECT id, document_id, version, s3_key, file_size,
+		       mime_type, uploaded_by, created_at, note
+		FROM document_versions WHERE s3_key = $1
+	`
+	var v model.DocumentVersion
+	err := r.db.QueryRow(ctx, query, s3Key).Scan(
+		&v.ID, &v.DocumentID, &v.Version, &v.S3Key,
+		&v.FileSize, &v.MimeType, &v.UploadedBy,
+		&v.CreatedAt, &v.Note,
+	)
+	if err == pgx.ErrNoRows {
+		return nil, storage.ErrDocumentNotFound
+	}
+	return &v, err
+}
+
+// GetVersion получает конкретную версию документа.
+func (r *DocumentRepository) GetVersion(
+	ctx context.Context,
+	docID uuid.UUID,
+	version int,
+) (*model.DocumentVersion, error) {
+	query := `
+		SELECT id, document_id, version, s3_key, file_size,
+		       mime_type, uploaded_by, created_at, note
+		FROM document_versions
+		WHERE document_id = $1 AND version = $2
+	`
+	var v model.DocumentVersion
+	err := r.db.QueryRow(ctx, query, docID, version).Scan(
+		&v.ID, &v.DocumentID, &v.Version, &v.S3Key,
+		&v.FileSize, &v.MimeType, &v.UploadedBy,
+		&v.CreatedAt, &v.Note,
+	)
+	if err == pgx.ErrNoRows {
+		return nil, storage.ErrDocumentNotFound
+	}
+	return &v, err
+}
+
+// GetNextVersionNumber возвращает следующий доступный номер версии для документа.
+func (r *DocumentRepository) GetNextVersionNumber(ctx context.Context, docID uuid.UUID) (int, error) {
+	var maxVer int
+	err := r.db.QueryRow(
+		ctx,
+		"SELECT COALESCE(MAX(version), 0) FROM document_versions WHERE document_id = $1",
+		docID,
+	).Scan(&maxVer)
+	if err != nil {
+		return 0, fmt.Errorf("get max version: %w", err)
+	}
+	return maxVer + 1, nil
 }

@@ -50,23 +50,14 @@ func (s *DocumentService) UploadDocument(
 ) (*model.Document, error) {
 
 	docID := uuid.New()
-
 	s3Key := s3storage.GenerateKey(input.Filename)
 
-	contentType := mime.TypeByExtension(
-		filepath.Ext(input.Filename),
-	)
-
+	contentType := mime.TypeByExtension(filepath.Ext(input.Filename))
 	if contentType == "" {
 		contentType = "text/plain"
 	}
 
-	err := s.s3Storage.UploadFile(
-		ctx,
-		s3Key,
-		input.Data,
-		contentType,
-	)
+	err := s.s3Storage.UploadFile(ctx, s3Key, input.Data, contentType)
 	if err != nil {
 		return nil, err
 	}
@@ -88,10 +79,24 @@ func (s *DocumentService) UploadDocument(
 		FileSize:         int64(len(input.Data)),
 		MimeType:         contentType,
 		TokenCount:       len(tokens),
+		CurrentVersion:   1,
 	}
 
 	err = s.docRepo.Create(ctx, doc)
 	if err != nil {
+		return nil, err
+	}
+
+	version := &model.DocumentVersion{
+		DocumentID: docID,
+		Version:    1,
+		S3Key:      s3Key,
+		FileSize:   doc.FileSize,
+		MimeType:   doc.MimeType,
+		UploadedBy: input.OwnerID,
+		Note:       "Initial version",
+	}
+	if err := s.docRepo.CreateVersion(ctx, version); err != nil {
 		return nil, err
 	}
 
@@ -185,6 +190,127 @@ func (s *DocumentService) DeleteDocument(
 	}
 
 	return nil
+}
+
+// UploadNewVersion загружает новую версию существующего документа.
+func (s *DocumentService) UploadNewVersion(
+	ctx context.Context,
+	docID uuid.UUID,
+	uploaderID uuid.UUID,
+	data []byte,
+	filename string,
+	note string,
+) (*model.DocumentVersion, error) {
+
+	doc, err := s.docRepo.GetByID(ctx, docID)
+	if err != nil {
+		return nil, err
+	}
+	if doc.OwnerID != uploaderID {
+		return nil, fmt.Errorf("forbidden: not document owner")
+	}
+
+	newVersion, err := s.docRepo.GetNextVersionNumber(ctx, docID)
+	if err != nil {
+		return nil, err
+	}
+
+	s3Key := fmt.Sprintf("doc/%s/v%d/%s", docID.String(), newVersion, uuid.New().String()+"-"+filename)
+
+	contentType := mime.TypeByExtension(filepath.Ext(filename))
+	if contentType == "" {
+		contentType = "text/plain"
+	}
+
+	if err := s.s3Storage.UploadFile(ctx, s3Key, data, contentType); err != nil {
+		return nil, err
+	}
+
+	version := &model.DocumentVersion{
+		DocumentID: docID,
+		Version:    newVersion,
+		S3Key:      s3Key,
+		FileSize:   int64(len(data)),
+		MimeType:   contentType,
+		UploadedBy: uploaderID,
+		Note:       note,
+	}
+	if err := s.docRepo.CreateVersion(ctx, version); err != nil {
+		return nil, err
+	}
+
+	if err := s.docRepo.UpdateCurrentVersion(
+		ctx, docID, newVersion, s3Key, filename, contentType, int64(len(data)),
+	); err != nil {
+		return nil, err
+	}
+
+	_ = s.indexDocument(ctx, docID, string(data))
+	s.invalidateSearchCache(ctx, string(data))
+
+	return version, nil
+}
+
+// GetDocumentVersion получает конкретную версию документа.
+func (s *DocumentService) GetDocumentVersion(
+	ctx context.Context,
+	docID uuid.UUID,
+	version int,
+) (*model.DocumentVersion, []byte, error) {
+
+	// Находим запись версии в БД
+	ver, err := s.docRepo.GetVersion(ctx, docID, version)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// Скачиваем файл из S3
+	data, err := s.s3Storage.DownloadFile(ctx, ver.S3Key)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return ver, data, nil
+}
+
+// RollbackToVersion делает указанную версию текущей (rollback).
+func (s *DocumentService) RollbackToVersion(
+	ctx context.Context,
+	docID uuid.UUID,
+	targetVersion int,
+	uploaderID uuid.UUID,
+) error {
+	doc, err := s.docRepo.GetByID(ctx, docID)
+	if err != nil {
+		return err
+	}
+	if doc.OwnerID != uploaderID {
+		return fmt.Errorf("forbidden")
+	}
+
+	// Находим целевую версию
+	targetVer, err := s.docRepo.GetVersion(ctx, docID, targetVersion)
+	if err != nil {
+		return err
+	}
+
+	// Обновляем current_version и метаданные
+	if err := s.docRepo.UpdateCurrentVersion(
+		ctx, docID, targetVersion, targetVer.S3Key,
+		doc.OriginalFilename, targetVer.MimeType, targetVer.FileSize,
+	); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// ListDocumentVersions получает список версий документа.
+func (s *DocumentService) ListDocumentVersions(
+	ctx context.Context,
+	docID uuid.UUID,
+) ([]model.DocumentVersion, error) {
+	return s.docRepo.ListVersions(ctx, docID)
 }
 
 // invalidateSearchCache удаляет ключи кеша поиска по терминам документа.
