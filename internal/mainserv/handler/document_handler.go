@@ -6,11 +6,14 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
+	"github.com/drobyshevv/doc-service/internal/mainserv/model"
 	"github.com/drobyshevv/doc-service/internal/mainserv/service"
+	"github.com/drobyshevv/doc-service/internal/mainserv/storage"
 )
 
 type DocumentHandler struct {
@@ -305,4 +308,150 @@ func (h *DocumentHandler) RollbackVersion(w http.ResponseWriter, r *http.Request
 	}
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// UpdateMetadata обрабатывает запрос на обновление метаданных документа.
+func (h *DocumentHandler) UpdateMetadata(w http.ResponseWriter, r *http.Request) {
+	docID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		http.Error(w, "invalid id", http.StatusBadRequest)
+		return
+	}
+
+	userID, err := uuid.Parse(r.Header.Get("X-User-ID"))
+	if err != nil {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	var input model.UpdateMetadataInput
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	updatedDoc, err := h.documentService.UpdateDocumentMetadata(
+		r.Context(), docID, userID, input,
+	)
+	if err != nil {
+		if err.Error() == "forbidden: not document owner" {
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(updatedDoc)
+}
+
+// ListDocuments обрабатывает запрос на получение списка документов.
+// Поддерживает пагинацию (?page=1&limit=20), сортировку (?sort=title&order=asc)
+// и фильтрацию (?mime_type=pdf&is_public=true&search=договор).
+func (h *DocumentHandler) ListDocuments(w http.ResponseWriter, r *http.Request) {
+	userID, err := uuid.Parse(r.Header.Get("X-User-ID"))
+	if err != nil {
+		// Для публичных документов userID может быть пустым — разрешаем анонимный доступ
+		// но показываем только is_public=true
+		userID = uuid.Nil
+	}
+
+	// Парсим параметры запроса
+	q := r.URL.Query()
+	query := model.ListDocumentsQuery{
+		Page:      parseIntParam(q.Get("page"), 1),
+		Limit:     parseIntParam(q.Get("limit"), 20),
+		SortBy:    q.Get("sort"),
+		SortOrder: q.Get("order"),
+	}
+
+	if mt := q.Get("mime_type"); mt != "" {
+		query.MimeType = &mt
+	}
+	if ip := q.Get("is_public"); ip != "" {
+		val := ip == "true"
+		query.IsPublic = &val
+	}
+	if from := q.Get("from"); from != "" {
+		if t, err := time.Parse(time.RFC3339, from); err == nil {
+			query.From = &t
+		}
+	}
+	if to := q.Get("to"); to != "" {
+		if t, err := time.Parse(time.RFC3339, to); err == nil {
+			query.To = &t
+		}
+	}
+	if search := q.Get("search"); search != "" {
+		query.Search = &search
+	}
+
+	// Ограничиваем limit для защиты от перегрузки
+	if query.Limit > 100 {
+		query.Limit = 100
+	}
+
+	documents, total, err := h.documentService.ListDocuments(r.Context(), userID, query)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Возвращаем результат с метаданными пагинации
+	response := map[string]interface{}{
+		"documents": documents,
+		"pagination": map[string]int{
+			"page":  query.Page,
+			"limit": query.Limit,
+			"total": total,
+		},
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
+}
+
+// GetMetadata обрабатывает запрос на получение метаданных документа без скачивания файла.
+func (h *DocumentHandler) GetMetadata(w http.ResponseWriter, r *http.Request) {
+	docID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		http.Error(w, "invalid id", http.StatusBadRequest)
+		return
+	}
+
+	// requesterID может быть пустым для анонимного доступа к публичным документам
+	var requesterID uuid.UUID
+	if uid := r.Header.Get("X-User-ID"); uid != "" {
+		requesterID, _ = uuid.Parse(uid)
+	}
+
+	meta, err := h.documentService.GetDocumentMetadata(r.Context(), docID, requesterID)
+	if err != nil {
+		if err.Error() == "forbidden" {
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
+		if err == storage.ErrDocumentNotFound {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(meta)
+}
+
+// Вспомогательная функция для парсинга целочисленных параметров.
+func parseIntParam(s string, defaultValue int) int {
+	if s == "" {
+		return defaultValue
+	}
+	val, err := strconv.Atoi(s)
+	if err != nil || val < 1 {
+		return defaultValue
+	}
+	return val
 }

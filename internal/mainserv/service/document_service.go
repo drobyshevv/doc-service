@@ -313,6 +313,85 @@ func (s *DocumentService) ListDocumentVersions(
 	return s.docRepo.ListVersions(ctx, docID)
 }
 
+// UpdateDocumentMetadata обновляет метаданные документа.
+func (s *DocumentService) UpdateDocumentMetadata(
+	ctx context.Context,
+	docID uuid.UUID,
+	updaterID uuid.UUID,
+	input model.UpdateMetadataInput,
+) (*model.Document, error) {
+
+	// 1. Проверяем права (только владелец может менять метаданные)
+	doc, err := s.docRepo.GetByID(ctx, docID)
+	if err != nil {
+		return nil, err
+	}
+	if doc.OwnerID != updaterID {
+		return nil, fmt.Errorf("forbidden: not document owner")
+	}
+
+	// 2. Обновляем метаданные в БД
+	updatedDoc, err := s.docRepo.UpdateMetadata(ctx, docID, input)
+	if err != nil {
+		return nil, err
+	}
+
+	// 3. Если изменился is_public — инвалидируем кеш поиска
+	if input.IsPublic != nil && *input.IsPublic != doc.IsPublic {
+		s.invalidateSearchCacheByDocument(ctx, docID)
+	}
+
+	return updatedDoc, nil
+}
+
+// ListDocuments возвращает список документов с фильтрацией и пагинацией.
+func (s *DocumentService) ListDocuments(
+	ctx context.Context,
+	userID uuid.UUID,
+	query model.ListDocumentsQuery,
+) ([]model.Document, int, error) {
+	return s.docRepo.ListWithFilters(ctx, userID, query)
+}
+
+// GetDocumentMetadata возвращает только метаданные документа (без загрузки файла).
+func (s *DocumentService) GetDocumentMetadata(
+	ctx context.Context,
+	docID uuid.UUID,
+	requesterID uuid.UUID,
+) (*model.DocumentMeta, error) {
+
+	meta, err := s.docRepo.GetMetadataByID(ctx, docID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Проверка прав: публичный ИЛИ владелец
+	if !meta.IsPublic && meta.OwnerID != requesterID {
+		return nil, fmt.Errorf("forbidden")
+	}
+
+	return meta, nil
+}
+
+// invalidateSearchCacheByDocument удаляет все ключи кеша, связанные с документом.
+// Используется при изменении is_public или при обновлении содержимого.
+func (s *DocumentService) invalidateSearchCacheByDocument(ctx context.Context, docID uuid.UUID) {
+	// Получаем документ для извлечения терминов
+	doc, err := s.docRepo.GetByID(ctx, docID)
+	if err != nil {
+		return // не блокируем основной поток, если не удалось получить документ
+	}
+
+	// Загружаем содержимое файла для токенизации
+	data, err := s.s3Storage.DownloadFile(ctx, doc.S3Key)
+	if err != nil {
+		return
+	}
+
+	// Инвалидируем кеш по терминам документа
+	s.invalidateSearchCache(ctx, string(data))
+}
+
 // invalidateSearchCache удаляет ключи кеша поиска по терминам документа.
 func (s *DocumentService) invalidateSearchCache(ctx context.Context, text string) {
 	terms := tokenizer.Tokenize(text)

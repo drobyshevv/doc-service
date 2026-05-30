@@ -96,6 +96,10 @@ func main() {
 		r.Get("/{id}/versions", documentHandler.ListVersions)
 		r.Get("/{id}/versions/{version}", documentHandler.GetVersion)
 		r.Post("/{id}/versions/{version}/rollback", documentHandler.RollbackVersion)
+
+		r.Get("/", documentHandler.ListDocuments)
+		r.Put("/{id}", documentHandler.UpdateMetadata)
+		r.Get("/{id}/meta", documentHandler.GetMetadata)
 	})
 
 	router.Route("/search", func(r chi.Router) {

@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -396,4 +397,181 @@ func (r *DocumentRepository) GetNextVersionNumber(ctx context.Context, docID uui
 		return 0, fmt.Errorf("get max version: %w", err)
 	}
 	return maxVer + 1, nil
+}
+
+// UpdateMetadata обновляет метаданные документа (title, is_public).
+// Возвращает обновлённый документ с актуальными временными метками.
+func (r *DocumentRepository) UpdateMetadata(
+	ctx context.Context,
+	docID uuid.UUID,
+	input model.UpdateMetadataInput,
+) (*model.Document, error) {
+
+	// Динамически строим UPDATE-запрос только для указанных полей
+	updates := []string{}
+	args := []interface{}{}
+	argIdx := 1
+
+	if input.Title != nil {
+		updates = append(updates, fmt.Sprintf("title = $%d", argIdx))
+		args = append(args, *input.Title)
+		argIdx++
+	}
+	if input.IsPublic != nil {
+		updates = append(updates, fmt.Sprintf("is_public = $%d", argIdx))
+		args = append(args, *input.IsPublic)
+		argIdx++
+	}
+
+	if len(updates) == 0 {
+		// Ничего не обновляем — возвращаем текущее состояние
+		return r.GetByID(ctx, docID)
+	}
+
+	// Добавляем updated_at и ID
+	updates = append(updates, fmt.Sprintf("updated_at = NOW(), id = $%d", argIdx))
+	args = append(args, docID)
+
+	query := fmt.Sprintf(`
+		UPDATE documents 
+		SET %s
+		WHERE id = $%d
+		RETURNING 
+			id, owner_id, title, original_filename, s3_key, is_public,
+			file_size, mime_type, token_count, current_version, created_at, updated_at
+	`, strings.Join(updates, ", "), argIdx)
+
+	var doc model.Document
+	err := r.db.QueryRow(ctx, query, args...).Scan(
+		&doc.ID, &doc.OwnerID, &doc.Title, &doc.OriginalFilename,
+		&doc.S3Key, &doc.IsPublic, &doc.FileSize, &doc.MimeType,
+		&doc.TokenCount, &doc.CurrentVersion, &doc.CreatedAt, &doc.UpdatedAt,
+	)
+	if err == pgx.ErrNoRows {
+		return nil, storage.ErrDocumentNotFound
+	}
+	return &doc, err
+}
+
+// ListWithFilters возвращает список документов с поддержкой фильтрации и пагинации.
+// Показывает только документы пользователя + публичные документы других пользователей.
+func (r *DocumentRepository) ListWithFilters(
+	ctx context.Context,
+	userID uuid.UUID,
+	query model.ListDocumentsQuery,
+) ([]model.Document, int, error) {
+
+	// Базовый запрос
+	baseQuery := `
+		SELECT COUNT(*) OVER() as total,
+		       id, owner_id, title, original_filename, s3_key, is_public,
+		       file_size, mime_type, token_count, current_version, created_at, updated_at
+		FROM documents
+		WHERE owner_id = $1 OR is_public = true
+	`
+
+	args := []interface{}{userID}
+	argIdx := 2
+
+	// Динамические фильтры
+	if query.MimeType != nil && *query.MimeType != "" {
+		baseQuery += fmt.Sprintf(" AND mime_type = $%d", argIdx)
+		args = append(args, *query.MimeType)
+		argIdx++
+	}
+	if query.IsPublic != nil {
+		baseQuery += fmt.Sprintf(" AND is_public = $%d", argIdx)
+		args = append(args, *query.IsPublic)
+		argIdx++
+	}
+	if query.From != nil {
+		baseQuery += fmt.Sprintf(" AND created_at >= $%d", argIdx)
+		args = append(args, *query.From)
+		argIdx++
+	}
+	if query.To != nil {
+		baseQuery += fmt.Sprintf(" AND created_at <= $%d", argIdx)
+		args = append(args, *query.To)
+		argIdx++
+	}
+	if query.Search != nil && *query.Search != "" {
+		baseQuery += fmt.Sprintf(" AND (title ILIKE $%d OR original_filename ILIKE $%d)", argIdx, argIdx)
+		args = append(args, "%"+*query.Search+"%")
+		argIdx++
+	}
+
+	// Сортировка (белый список допустимых полей)
+	validSort := map[string]bool{"created_at": true, "title": true, "file_size": true}
+	sortBy := query.SortBy
+	if sortBy == "" || !validSort[sortBy] {
+		sortBy = "created_at"
+	}
+	sortOrder := "DESC"
+	if strings.ToUpper(query.SortOrder) == "ASC" {
+		sortOrder = "ASC"
+	}
+	baseQuery += fmt.Sprintf(" ORDER BY %s %s", sortBy, sortOrder)
+
+	// Пагинация
+	limit := query.Limit
+	if limit <= 0 {
+		limit = 20
+	}
+	page := query.Page
+	if page <= 0 {
+		page = 1
+	}
+	offset := (page - 1) * limit
+
+	baseQuery += fmt.Sprintf(" LIMIT $%d OFFSET $%d", argIdx, argIdx+1)
+	args = append(args, limit, offset)
+
+	// Выполняем запрос
+	rows, err := r.db.Query(ctx, baseQuery, args...)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+
+	var documents []model.Document
+	var total int
+
+	for rows.Next() {
+		var doc model.Document
+		err := rows.Scan(
+			&total,
+			&doc.ID, &doc.OwnerID, &doc.Title, &doc.OriginalFilename,
+			&doc.S3Key, &doc.IsPublic, &doc.FileSize, &doc.MimeType,
+			&doc.TokenCount, &doc.CurrentVersion, &doc.CreatedAt, &doc.UpdatedAt,
+		)
+		if err != nil {
+			return nil, 0, err
+		}
+		documents = append(documents, doc)
+	}
+
+	return documents, total, rows.Err()
+}
+
+// GetMetadataByID возвращает только метаданные документа (без обращения к S3).
+func (r *DocumentRepository) GetMetadataByID(
+	ctx context.Context,
+	id uuid.UUID,
+) (*model.DocumentMeta, error) {
+	query := `
+		SELECT id, owner_id, title, original_filename, is_public,
+		       file_size, mime_type, token_count, current_version, created_at, updated_at
+		FROM documents WHERE id = $1
+	`
+
+	var meta model.DocumentMeta
+	err := r.db.QueryRow(ctx, query, id).Scan(
+		&meta.ID, &meta.OwnerID, &meta.Title, &meta.OriginalFilename,
+		&meta.IsPublic, &meta.FileSize, &meta.MimeType, &meta.TokenCount,
+		&meta.CurrentVersion, &meta.CreatedAt, &meta.UpdatedAt,
+	)
+	if err == pgx.ErrNoRows {
+		return nil, storage.ErrDocumentNotFound
+	}
+	return &meta, err
 }

@@ -68,6 +68,8 @@ func main() {
 	r.Group(func(r chi.Router) {
 		r.Use(authMiddleware.Middleware)
 
+		r.Handle("GET /documents", mainProxy)
+
 		r.Handle("/documents/*", mainProxy)
 		r.Handle("/search/owner", mainProxy)
 	})
