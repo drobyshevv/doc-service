@@ -110,6 +110,8 @@ func main() {
 		r.Get("/suggest", searchHandler.Suggest)
 	})
 
+	router.Get("/public/documents", documentHandler.ListPublicDocuments)
+
 	server := &http.Server{
 		Addr:         cfg.HTTPAddr(),
 		Handler:      router,

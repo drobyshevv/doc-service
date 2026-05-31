@@ -392,6 +392,11 @@ func (s *DocumentService) invalidateSearchCacheByDocument(ctx context.Context, d
 	s.invalidateSearchCache(ctx, string(data))
 }
 
+// ListByOwner возвращает список документов конкретного пользователя.
+func (s *DocumentService) ListByOwner(ctx context.Context, ownerID uuid.UUID) ([]model.Document, error) {
+	return s.docRepo.ListByOwner(ctx, ownerID)
+}
+
 // invalidateSearchCache удаляет ключи кеша поиска по терминам документа.
 func (s *DocumentService) invalidateSearchCache(ctx context.Context, text string) {
 	terms := tokenizer.Tokenize(text)

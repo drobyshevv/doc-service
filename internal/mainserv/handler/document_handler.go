@@ -6,7 +6,6 @@ import (
 	"io"
 	"net/http"
 	"strconv"
-	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -35,10 +34,7 @@ func NewDocumentHandler(
 // метаданными документа и параметрами доступа.
 // После успешной загрузки сохраняет файл,
 // индексирует содержимое и возвращает созданный документ.
-func (h *DocumentHandler) UploadDocument(
-	w http.ResponseWriter,
-	r *http.Request,
-) {
+func (h *DocumentHandler) UploadDocument(w http.ResponseWriter, r *http.Request) {
 	err := r.ParseMultipartForm(10 << 20)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -58,27 +54,15 @@ func (h *DocumentHandler) UploadDocument(
 		return
 	}
 
-	owner := r.FormValue("owner_id")
-	ownerID, err := uuid.Parse(owner)
-	if err != nil {
-		http.Error(w, "invalid owner_id", http.StatusBadRequest)
-		return
-	}
-
 	userIDStr := r.Header.Get("X-User-ID")
 	if userIDStr == "" {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		http.Error(w, "unauthorized: X-User-ID header required", http.StatusUnauthorized)
 		return
 	}
 
-	userID, err := uuid.Parse(userIDStr)
+	ownerID, err := uuid.Parse(userIDStr)
 	if err != nil {
 		http.Error(w, "invalid user header", http.StatusInternalServerError)
-		return
-	}
-
-	if ownerID != userID {
-		http.Error(w, "forbidden: cannot upload for another user", http.StatusForbidden)
 		return
 	}
 
@@ -346,70 +330,54 @@ func (h *DocumentHandler) UpdateMetadata(w http.ResponseWriter, r *http.Request)
 	json.NewEncoder(w).Encode(updatedDoc)
 }
 
-// ListDocuments обрабатывает запрос на получение списка документов.
-// Поддерживает пагинацию (?page=1&limit=20), сортировку (?sort=title&order=asc)
-// и фильтрацию (?mime_type=pdf&is_public=true&search=договор).
+// ListDocuments возвращает ТОЛЬКО документы текущего пользователя.
+// Вызывается со страницы "Мои документы" (/).
 func (h *DocumentHandler) ListDocuments(w http.ResponseWriter, r *http.Request) {
-	userID, err := uuid.Parse(r.Header.Get("X-User-ID"))
+	userIDStr := r.Header.Get("X-User-ID")
+	if userIDStr == "" {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	userID, err := uuid.Parse(userIDStr)
 	if err != nil {
-		// Для публичных документов userID может быть пустым — разрешаем анонимный доступ
-		// но показываем только is_public=true
-		userID = uuid.Nil
+		http.Error(w, "invalid user header", http.StatusInternalServerError)
+		return
 	}
 
-	// Парсим параметры запроса
-	q := r.URL.Query()
-	query := model.ListDocumentsQuery{
-		Page:      parseIntParam(q.Get("page"), 1),
-		Limit:     parseIntParam(q.Get("limit"), 20),
-		SortBy:    q.Get("sort"),
-		SortOrder: q.Get("order"),
-	}
-
-	if mt := q.Get("mime_type"); mt != "" {
-		query.MimeType = &mt
-	}
-	if ip := q.Get("is_public"); ip != "" {
-		val := ip == "true"
-		query.IsPublic = &val
-	}
-	if from := q.Get("from"); from != "" {
-		if t, err := time.Parse(time.RFC3339, from); err == nil {
-			query.From = &t
-		}
-	}
-	if to := q.Get("to"); to != "" {
-		if t, err := time.Parse(time.RFC3339, to); err == nil {
-			query.To = &t
-		}
-	}
-	if search := q.Get("search"); search != "" {
-		query.Search = &search
-	}
-
-	// Ограничиваем limit для защиты от перегрузки
-	if query.Limit > 100 {
-		query.Limit = 100
-	}
-
-	documents, total, err := h.documentService.ListDocuments(r.Context(), userID, query)
+	documents, err := h.documentService.ListByOwner(r.Context(), userID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	// Возвращаем результат с метаданными пагинации
-	response := map[string]interface{}{
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
 		"documents": documents,
-		"pagination": map[string]int{
-			"page":  query.Page,
-			"limit": query.Limit,
-			"total": total,
-		},
+	})
+}
+
+// ListPublicDocuments возвращает ТОЛЬКО публичные документы всех пользователей.
+// Вызывается со страницы поиска публичных (/search).
+func (h *DocumentHandler) ListPublicDocuments(w http.ResponseWriter, r *http.Request) {
+
+	documents, _, err := h.documentService.ListDocuments(r.Context(), uuid.Nil, model.ListDocumentsQuery{
+		Limit:    100,
+		IsPublic: boolPtr(true), // 🔥 Только публичные
+	})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(response)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"documents": documents,
+	})
+}
+
+func boolPtr(b bool) *bool {
+	return &b
 }
 
 // GetMetadata обрабатывает запрос на получение метаданных документа без скачивания файла.
@@ -420,7 +388,6 @@ func (h *DocumentHandler) GetMetadata(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// requesterID может быть пустым для анонимного доступа к публичным документам
 	var requesterID uuid.UUID
 	if uid := r.Header.Get("X-User-ID"); uid != "" {
 		requesterID, _ = uuid.Parse(uid)

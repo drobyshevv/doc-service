@@ -55,7 +55,6 @@ func main() {
 	// PUBLIC AUTH
 	r.Mount("/auth", authProxy)
 
-	// PUBLIC SEARCH
 	r.Group(func(r chi.Router) {
 		r.Handle("/search", mainProxy)
 		r.Handle("/search/", mainProxy)
@@ -64,12 +63,11 @@ func main() {
 		r.Handle("/health", mainProxy)
 	})
 
-	// PROTECTED ROUTES
+	// PROTECTED ROUTES (с авторизацией)
 	r.Group(func(r chi.Router) {
 		r.Use(authMiddleware.Middleware)
 
 		r.Handle("GET /documents", mainProxy)
-
 		r.Handle("/documents/*", mainProxy)
 		r.Handle("/search/owner", mainProxy)
 	})
