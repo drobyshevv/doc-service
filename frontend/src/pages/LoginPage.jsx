@@ -1,6 +1,6 @@
 // frontend/src/pages/LoginPage.jsx
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 
 export default function LoginPage() {
@@ -16,72 +16,94 @@ export default function LoginPage() {
     setError('');
     setSubmitting(true);
     
-    console.log('🔐 Login attempt:', { email });
-    
     try {
-      const userData = await login(email, password);
-      console.log('Login success, user:', userData);
-      
-      window.location.href = '/';
+      await login(email, password);
+      navigate('/');
     } catch (err) {
-      console.error('Login error:', err);
-      setError(err.message || err.response?.data || 'Ошибка входа');
+      setError(err.message || 'Ошибка входа');
     } finally {
       setSubmitting(false);
     }
   };
 
   return (
-    <div style={{ maxWidth: 400, margin: '3rem auto', padding: '1.5rem' }}>
-      <p style={{ textAlign: 'center', marginBottom: '1rem' }}>
-        <a href="/search" style={{ color: '#666' }}>🔍 Искать публичные документы без входа</a>
-      </p>
-      
-      <h2>🔐 Вход</h2>
-      
-      {error && (
-        <p style={{ color: 'red', background: '#fee', padding: '0.5rem', borderRadius: '4px', marginBottom: '1rem' }}>
-          {error}
-        </p>
-      )}
-      
-      <form onSubmit={handleSubmit}>
-        <div style={{ marginBottom: '1rem' }}>
-          <label>Email<br />
-            <input 
-              type="email" 
+    <div className="page-auth">
+      <div className="page-auth__card">
+        {/* Логотип */}
+        <div className="page-auth__logo">
+          <Link to="/" className="logo-link">
+            <div className="logo">D</div>
+            <span>DocService</span>
+          </Link>
+        </div>
+
+        {/* Заголовок */}
+        <div className="page-auth__header">
+          <h1 className="page-auth__title">Вход в аккаунт</h1>
+          <p className="page-auth__subtitle">Введите данные для доступа к документам</p>
+        </div>
+
+        {/* Ошибка */}
+        {error && (
+          <div className="page-auth__error" role="alert">
+            {error}
+          </div>
+        )}
+
+        {/* Форма */}
+        <form onSubmit={handleSubmit} className="page-auth__form">
+          <div className="form-group">
+            <label htmlFor="email" className="form-label">Email</label>
+            <input
+              id="email"
+              type="email"
               value={email}
-              onChange={e => setEmail(e.target.value)}
+              onChange={(e) => setEmail(e.target.value)}
+              className="input"
+              placeholder="you@example.com"
               required
               disabled={submitting}
-              style={{ width: '100%', padding: '0.5rem', boxSizing: 'border-box' }}
+              autoComplete="email"
             />
-          </label>
-        </div>
-        <div style={{ marginBottom: '1rem' }}>
-          <label>Пароль<br />
-            <input 
-              type="password" 
+          </div>
+
+          <div className="form-group">
+            <label htmlFor="password" className="form-label">Пароль</label>
+            <input
+              id="password"
+              type="password"
               value={password}
-              onChange={e => setPassword(e.target.value)}
+              onChange={(e) => setPassword(e.target.value)}
+              className="input"
+              placeholder="••••••••"
               required
               disabled={submitting}
-              style={{ width: '100%', padding: '0.5rem', boxSizing: 'border-box' }}
+              autoComplete="current-password"
             />
-          </label>
+          </div>
+
+          <button
+            type="submit"
+            disabled={submitting}
+            className="btn btn-primary btn--full"
+          >
+            {submitting ? 'Вход...' : 'Войти'}
+          </button>
+        </form>
+
+        {/* Ссылки */}
+        <div className="page-auth__footer">
+          <p className="page-auth__text">
+            Нет аккаунта?{' '}
+            <Link to="/register" className="link-primary">Зарегистрироваться</Link>
+          </p>
+          <p className="page-auth__text">
+            <Link to="/search" className="link-muted">
+              🔍 Искать публичные документы без входа
+            </Link>
+          </p>
         </div>
-        <button 
-          type="submit" 
-          disabled={submitting}
-          style={{ 
-            padding: '0.5rem 1rem', 
-            opacity: submitting ? 0.6 : 1,
-            cursor: submitting ? 'not-allowed' : 'pointer'
-          }}
-        >
-          {submitting ? 'Вход...' : 'Войти'}
-        </button>
-      </form>
+      </div>
     </div>
   );
 }

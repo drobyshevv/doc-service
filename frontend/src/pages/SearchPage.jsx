@@ -1,197 +1,144 @@
+// frontend/src/pages/HomePage.jsx (переименуй SearchPage.jsx в HomePage.jsx)
 import { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import Header from '../components/Header';
+import DocumentCard from '../components/DocumentCard';
 import { documentsAPI, searchAPI } from '../services/api';
 
-const getField = (obj, ...names) => {
-  for (const name of names) {
-    if (obj?.[name] !== undefined && obj?.[name] !== null) return obj[name];
-  }
-  return null;
-};
-const formatDate = (val) => {
-  if (!val) return '—';
-  const d = new Date(val);
-  return isNaN(d.getTime()) ? '—' : d.toLocaleDateString('ru-RU');
-};
-const formatSize = (b) => {
-  if (!b && b !== 0) return '—';
-  const k = b/1024;
-  return k < 1024 ? `${k.toFixed(1)} KB` : `${(k/1024).toFixed(1)} MB`;
-};
-
-export default function SearchPage() {
-  const { user, logout } = useAuth();
+export default function HomePage() {
+  const { isAuthenticated } = useAuth();
+  const navigate = useNavigate();
   const [docs, setDocs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState('');
-  const [error, setError] = useState('');
-  const [debug, setDebug] = useState('');
 
-  const loadPublic = async () => {
+  const loadPublicDocs = async () => {
     setLoading(true);
-    setError('');
     try {
       const res = await fetch('/public/documents?limit=50', {
         headers: { 'Authorization': 'Bearer ' + localStorage.getItem('token') }
       });
-      if (!res.ok) throw new Error('HTTP ' + res.status);
       const data = await res.json();
-      const docs = Array.isArray(data.documents) ? data.documents : [];
-      setDocs(docs);
+      setDocs(Array.isArray(data.documents) ? data.documents : []);
     } catch (err) {
-      console.error('Load public error:', err);
-      setError('Не удалось загрузить публичные документы');
+      console.error('Load error:', err);
       setDocs([]);
     } finally {
       setLoading(false);
     }
   };
 
-  useEffect(() => { loadPublic(); }, []);
+  useEffect(() => { loadPublicDocs(); }, []);
 
   const handleSearch = async () => {
-    if (!query.trim()) return loadPublic();
-    
+    if (!query.trim()) return loadPublicDocs();
     setLoading(true);
-    setError('');
-    setDebug(`Поиск: "${query}"...`);
-    
     try {
       const res = await searchAPI.search(query, { limit: 50 });
-      console.log('Search response:', res.data);
-      setDebug(`Ответ поиска: ${JSON.stringify(res.data).slice(0, 200)}...`);
-      
       const raw = Array.isArray(res.data) ? res.data : [];
-      
-      const extracted = raw
-        .map(r => getField(r, 'document', 'Document', 'doc') || r)
-        .filter(d => getField(d, 'ID', 'id'));
-      
-      setDebug(`Извлечено документов: ${extracted.length}`);
-      
-      const seen = new Set();
-      const unique = extracted.filter(d => {
-        const id = getField(d, 'ID', 'id');
-        if (!id || seen.has(id)) return false;
-        seen.add(id);
-        return true;
-      });
-      
-      setDebug(`Уникальных: ${unique.length}`);
+      const extracted = raw.map(r => r.document || r.Document || r).filter(d => d?.ID || d?.id);
+      const unique = [...new Map(extracted.map(d => [d.ID || d.id, d])).values()];
       setDocs(unique);
-      
-    } catch (err) {
-      console.error('Search error:', err);
-      setError('Ошибка поиска: ' + err.message);
-      setDocs([]);
+    } catch {
+      loadPublicDocs();
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div>
-      <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-        <div>
-          <h1>🔍 Поиск документов</h1>
-          <nav style={{ marginTop: '0.5rem' }}>
-            <Link to="/" style={{ marginRight: '1rem' }}>🏠 Мои документы</Link>
-            <Link to="/search" style={{ fontWeight: 'bold' }}>🔍 Публичные</Link>
-          </nav>
-        </div>
-        <div>
-          {user?.email ? (
-            <>
-              <span style={{ marginRight: '1rem' }}>{user.email}</span>
-              <button onClick={logout}>Выйти</button>
-            </>
-          ) : (
-            <Link to="/login"><button>Войти</button></Link>
-          )}
-        </div>
-      </header>
-
-      {error && (
-        <p style={{ color: 'red', background: '#fee', padding: '0.5rem', borderRadius: '4px', marginBottom: '1rem' }}>
-          {error}
-        </p>
-      )}
+    <div className="min-h-screen bg-slate-50">
+      <Header />
       
-      {debug && (
-        <p style={{ fontSize: '0.8rem', color: '#666', marginBottom: '1rem', fontFamily: 'monospace' }}>
-          🔍 {debug}
-        </p>
-      )}
+      {/* 🔹 Герой-секция */}
+      <section className="bg-gradient-to-br from-indigo-600 to-purple-700 text-white py-12 md:py-16">
+        <div className="container text-center">
+          <h1 className="text-3xl md:text-4xl font-bold mb-4">
+            Найдите и поделитесь документами
+          </h1>
+          <p className="text-lg text-indigo-100 mb-6 max-w-2xl mx-auto">
+            Безопасное хранение, версионирование и поиск по содержимому ваших файлов
+          </p>
+          
+          {/* 🔹 Поиск в герое */}
+          <div className="max-w-xl mx-auto flex gap-2">
+            <input
+              type="search"
+              placeholder="Поиск по названию или содержимому..."
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
+              className="input flex-1 bg-white/90 border-0 text-slate-800 placeholder-slate-400"
+            />
+            <button onClick={handleSearch} className="btn btn-primary">
+              Найти
+            </button>
+          </div>
+        </div>
+      </section>
 
-      <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem' }}>
-        <input 
-          type="search" 
-          placeholder="Поиск по содержимому (только публичные)..." 
-          value={query}
-          onChange={e => setQuery(e.target.value)} 
-          onKeyDown={e => e.key === 'Enter' && handleSearch()}
-          style={{ flex: 1, padding: '0.5rem' }} 
-        />
-        <button onClick={handleSearch} disabled={loading}>
-          {loading ? 'Поиск...' : 'Найти'}
-        </button>
-      </div>
+      {/* 🔹 Список документов */}
+      <main className="container py-8">
+        <div className="flex items-center justify-between mb-6">
+          <h2 className="text-xl font-semibold text-slate-800">
+            {query ? `Результаты: "${query}"` : 'Публичные документы'}
+          </h2>
+          <span className="text-sm text-slate-500">
+            {docs.length} {docs.length === 1 ? 'документ' : 'документов'}
+          </span>
+        </div>
 
-      {loading ? (
-        <p style={{ textAlign: 'center', padding: '2rem' }}>Загрузка...</p>
-      ) : (
-        <table>
-          <thead>
-            <tr>
-              <th>Название</th>
-              <th>Размер</th>
-              <th>Дата</th>
-              <th>Версия</th>
-              <th>Действия</th>
-            </tr>
-          </thead>
-          <tbody>
-            {docs.length ? docs.map(doc => {
-              const id = getField(doc, 'ID', 'id');
-              const title = getField(doc, 'Title', 'title', 'OriginalFilename', 'original_filename') || 'Без названия';
-              const size = formatSize(getField(doc, 'FileSize', 'file_size'));
-              const date = formatDate(getField(doc, 'CreatedAt', 'created_at'));
-              const version = getField(doc, 'CurrentVersion', 'current_version') || 1;
-              const isPub = getField(doc, 'IsPublic', 'is_public');
-              
-              return (
-                <tr key={id}>
-                  <td>
-                    <Link to={`/document/${id}`}>{title}</Link>
-                    {isPub && <span style={{marginLeft:'0.25rem',color:'#0a0'}}>🌐</span>}
-                  </td>
-                  <td className="meta">{size}</td>
-                  <td className="meta">{date}</td>
-                  <td className="meta">v{version}</td>
-                  <td className="actions">
-                    <button onClick={() => documentsAPI.download(id).then(r => {
-                      const a = document.createElement('a'); 
-                      a.href = URL.createObjectURL(r.data);
-                      a.download = title; 
-                      a.click();
-                    })}>⬇️</button>
-                    <Link to={`/document/${id}`}><button>👁️</button></Link>
-                  </td>
-                </tr>
-              );
-            }) : (
-              <tr>
-                <td colSpan="5" style={{ textAlign: 'center', padding: '2rem', color: '#666' }}>
-                  {query 
-                    ? 'Ничего не найдено. Попробуйте другой запрос или проверьте, что документ публичный.' 
-                    : 'Публичных документов пока нет'}
-                </td>
-              </tr>
+        {loading ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {[...Array(6)].map((_, i) => (
+              <div key={i} className="card animate-pulse">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-lg bg-slate-200" />
+                  <div className="flex-1">
+                    <div className="h-4 bg-slate-200 rounded w-3/4 mb-2" />
+                    <div className="h-3 bg-slate-200 rounded w-1/4" />
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : docs.length > 0 ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {docs.map(doc => (
+              <DocumentCard key={doc.ID || doc.id} doc={doc} />
+            ))}
+          </div>
+        ) : (
+          <div className="text-center py-12">
+            <div className="w-16 h-16 rounded-full bg-slate-100 flex items-center justify-center mx-auto mb-4">
+              <svg className="w-8 h-8 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+              </svg>
+            </div>
+            <h3 className="text-lg font-medium text-slate-800 mb-2">
+              {query ? 'Ничего не найдено' : 'Публичных документов пока нет'}
+            </h3>
+            <p className="text-slate-500 mb-4">
+              {query 
+                ? 'Попробуйте другой запрос или загрузите свой документ' 
+                : 'Зарегистрируйтесь и начните делиться файлами'}
+            </p>
+            {!isAuthenticated && (
+              <Link to="/register" className="btn btn-primary">
+                Создать аккаунт
+              </Link>
             )}
-          </tbody>
-        </table>
-      )}
+          </div>
+        )}
+      </main>
+
+      {/* 🔹 Футер */}
+      <footer className="border-t border-slate-200 py-6 mt-12">
+        <div className="container text-center text-sm text-slate-500">
+          © 2026 DocService. Все права защищены.
+        </div>
+      </footer>
     </div>
   );
 }
