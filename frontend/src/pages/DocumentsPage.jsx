@@ -157,9 +157,24 @@ export default function DocumentsPage() {
   const loadDocs = async () => {
     setLoading(true);
     try {
-      const res = await documentsAPI.list({ limit: 50 });
-      const data = Array.isArray(res.data) ? res.data : (res.data?.documents || []);
-      setDocs(data);
+      const token = localStorage.getItem('token');
+      const userId = JSON.parse(localStorage.getItem('user') || '{}')?.id;
+      
+      const res = await fetch('/documents?limit=50', {
+        headers: {
+          'Authorization': token ? `Bearer ${token}` : '',
+          'X-User-ID': userId || ''
+        },
+        // Отключаем кеш браузера — гарантируем свежие данные
+        cache: 'no-store'
+      });
+      
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      
+      const data = await res.json();
+      const docs = Array.isArray(data.documents) ? data.documents : [];
+      setDocs(docs);
+      
     } catch (err) {
       console.error('Load docs error:', err);
       setDocs([]);

@@ -195,6 +195,8 @@ func (r *DocumentRepository) ListByOwner(
 			is_public,
 			file_size,
 			mime_type,
+			token_count,
+			current_version,
 			created_at,
 			updated_at
 		FROM documents
@@ -223,6 +225,8 @@ func (r *DocumentRepository) ListByOwner(
 			&doc.IsPublic,
 			&doc.FileSize,
 			&doc.MimeType,
+			&doc.TokenCount,
+			&doc.CurrentVersion,
 			&doc.CreatedAt,
 			&doc.UpdatedAt,
 		)

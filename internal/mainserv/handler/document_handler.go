@@ -363,7 +363,7 @@ func (h *DocumentHandler) ListPublicDocuments(w http.ResponseWriter, r *http.Req
 
 	documents, _, err := h.documentService.ListDocuments(r.Context(), uuid.Nil, model.ListDocumentsQuery{
 		Limit:    100,
-		IsPublic: boolPtr(true), // 🔥 Только публичные
+		IsPublic: boolPtr(true),
 	})
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)

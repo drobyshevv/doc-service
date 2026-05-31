@@ -41,9 +41,9 @@ api.interceptors.response.use(
   }
 );
 
-// ============================================================================
+
 //  API: Аутентификация
-// ============================================================================
+
 export const authAPI = {
   /** Регистрация нового пользователя */
   register: (email, password) => 
@@ -54,9 +54,9 @@ export const authAPI = {
     api.post('/auth/login', { email, password }),
 };
 
-// ============================================================================
+
 //  API: Документы
-// ============================================================================
+
 export const documentsAPI = {
   list: (params = {}) => api.get('/documents', { params }),
   get: (id) => api.get(`/documents/${id}`),
@@ -66,11 +66,13 @@ export const documentsAPI = {
   /** Загрузка новой версии документа */
   uploadVersion: (id, formData) => {
     return api.post(`/documents/${id}/versions`, formData, {
-      headers: {
-        'Content-Type': undefined,
-      },
+      headers: { 'Content-Type': undefined },
     });
   },
+  
+  /** Обновление метаданных документа (название, приватность) */
+  updateMetadata: (id, data) => 
+    api.put(`/documents/${id}`, data),
   
   /** Скачивание документа (текущей или конкретной версии) */
   download: (id, version = null) => {
@@ -88,9 +90,9 @@ export const documentsAPI = {
   update: (id, data) => api.put(`/documents/${id}`, data),
 };
 
-// ============================================================================
+
 //  API: Поиск
-// ============================================================================
+
 export const searchAPI = {
   search: (query, params = {}) => 
     api.get('/search/', { params: { query, ...params } }),

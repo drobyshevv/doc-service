@@ -3,6 +3,7 @@ import { useState, useEffect } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { documentsAPI } from '../services/api';
 import UploadVersionModal from '../components/UploadVersionModal';
+import DocumentMetadataEditor from '../components/DocumentMetadataEditor';
 
 // ХЕЛПЕРЫ (чистые функции, без побочных эффектов)
 
@@ -179,7 +180,7 @@ function DocumentActions({ onDownload, onShowVersions, onDelete, onUploadVersion
           Скачать текущую версию
         </button>
         
-        {/* 🔥 Кнопка "Загрузить новую версию" — только для владельца */}
+        {/* Кнопка "Загрузить новую версию" — только для владельца */}
         {isOwner && (
           <button 
             onClick={onUploadVersion} 
@@ -362,7 +363,7 @@ export default function DocumentPage() {
     if (!window.confirm(`Откатиться к версии ${version}?`)) return;
     try {
       await documentsAPI.rollback(id, version);
-      // После отката перезагружаем данные
+      // После отката перезагружаем всё
       const [metaRes, verRes] = await Promise.all([
         documentsAPI.getMeta(id),
         documentsAPI.getVersions(id)
@@ -376,12 +377,21 @@ export default function DocumentPage() {
   };
 
   const handleVersionUploaded = () => {
-    // Перезагружаем список версий
-    documentsAPI.getVersions(id)
-      .then(res => {
-        setVersions(Array.isArray(res.data) ? res.data : []);
-      })
-      .catch(err => console.error('Failed to refresh versions:', err));
+    // Перезагружаем и версии, и метаданные (версия могла измениться)
+    Promise.all([
+      documentsAPI.getVersions(id),
+      documentsAPI.getMeta(id)
+    ])
+    .then(([verRes, metaRes]) => {
+      setVersions(Array.isArray(verRes.data) ? verRes.data : []);
+      setMeta(metaRes.data);
+    })
+    .catch(err => console.error('Failed to refresh document:', err));
+  };
+
+  const handleMetadataUpdated = (newData) => {
+    // Обновляем локальное состояние мета-информации
+    setMeta(prev => prev ? { ...prev, ...newData } : prev);
   };
 
   // Состояния
@@ -426,7 +436,19 @@ export default function DocumentPage() {
 
         {activeTab === 'info' ? (
           <div className="document-layout">
+            {/* Редактор метаданных (название + приватность) */}
+            <DocumentMetadataEditor
+              documentId={id}
+              initialTitle={title}
+              initialIsPublic={isPublic}
+              onUpdate={handleMetadataUpdated}
+              isOwner={isOwner}
+            />
+            
+            {/* Информация о документе */}
             <DocumentInfoCard meta={meta} />
+            
+            {/* Панель быстрых действий */}
             <DocumentActions
               onDownload={() => handleDownload()}
               onShowVersions={() => setActiveTab('versions')}
@@ -447,7 +469,7 @@ export default function DocumentPage() {
           </div>
         )}
       </main>
-      {/* 🔥 Модальное окно загрузки новой версии */}
+      {/* Модальное окно загрузки новой версии */}
       <UploadVersionModal
         isOpen={showUploadModal}
         onClose={() => setShowUploadModal(false)}
