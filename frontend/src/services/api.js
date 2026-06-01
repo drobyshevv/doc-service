@@ -63,6 +63,13 @@ export const documentsAPI = {
   getMeta: (id) => api.get(`/documents/${id}/meta`),
   getVersions: (id) => api.get(`/documents/${id}/versions`),
   
+  /** Загрузка нового документа */
+  upload: (formData) => {
+    return api.post('/documents/upload', formData, {
+      headers: { 'Content-Type': undefined },
+    });
+  },
+  
   /** Загрузка новой версии документа */
   uploadVersion: (id, formData) => {
     return api.post(`/documents/${id}/versions`, formData, {
@@ -70,11 +77,11 @@ export const documentsAPI = {
     });
   },
   
-  /** Обновление метаданных документа (название, приватность) */
+  /** Обновление метаданных документа */
   updateMetadata: (id, data) => 
     api.put(`/documents/${id}`, data),
   
-  /** Скачивание документа (текущей или конкретной версии) */
+  /** Скачивание документа */
   download: (id, version = null) => {
     const url = version 
       ? `/documents/${id}/versions/${version}` 
@@ -82,7 +89,7 @@ export const documentsAPI = {
     return api.get(url, { responseType: 'blob' });
   },
   
-  /** Откат к конкретной версии */
+  /** Откат к версии */
   rollback: (id, version) => 
     api.post(`/documents/${id}/versions/${version}/rollback`),
   

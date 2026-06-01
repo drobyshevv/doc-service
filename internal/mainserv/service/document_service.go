@@ -1,11 +1,14 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"log"
 	"mime"
 	"path/filepath"
 
+	"github.com/drobyshevv/doc-service/internal/mainserv/extractor"
 	"github.com/drobyshevv/doc-service/internal/mainserv/model"
 	"github.com/drobyshevv/doc-service/internal/mainserv/search/indexer"
 	"github.com/drobyshevv/doc-service/internal/mainserv/search/tokenizer"
@@ -67,7 +70,31 @@ func (s *DocumentService) UploadDocument(
 		title = input.Filename
 	}
 
-	tokens := tokenizer.Tokenize(string(input.Data))
+	ext := extractor.NewExtractor(contentType, input.Filename)
+	fileReader := bytes.NewReader(input.Data)
+	extractedText, err := ext.Extract(fileReader, contentType)
+	log.Printf("[DEBUG] Filename: %s, MIME: %s", input.Filename, contentType)
+	log.Printf("[DEBUG] Extracted text (first 200 chars): %q",
+		func() string {
+			if len(extractedText) > 200 {
+				return extractedText[:200] + "..."
+			}
+			return extractedText
+		}())
+	if err != nil {
+		log.Printf("[WARN] Failed to extract text from %s: %v. Indexing metadata only.", input.Filename, err)
+		extractedText = ""
+	}
+
+	tokens := tokenizer.Tokenize(extractedText)
+
+	log.Printf("[DEBUG] Tokens count: %d, first 10: %v", len(tokens),
+		func() []string {
+			if len(tokens) > 10 {
+				return tokens[:10]
+			}
+			return tokens
+		}())
 
 	doc := &model.Document{
 		ID:               docID,
@@ -100,12 +127,12 @@ func (s *DocumentService) UploadDocument(
 		return nil, err
 	}
 
-	err = s.indexDocument(ctx, docID, string(input.Data))
+	err = s.indexDocument(ctx, docID, extractedText)
 	if err != nil {
 		return nil, err
 	}
 
-	s.invalidateSearchCache(ctx, string(input.Data))
+	s.invalidateSearchCache(ctx, extractedText)
 
 	return doc, nil
 }
@@ -245,8 +272,17 @@ func (s *DocumentService) UploadNewVersion(
 		return nil, err
 	}
 
-	_ = s.indexDocument(ctx, docID, string(data))
-	s.invalidateSearchCache(ctx, string(data))
+	versionExt := extractor.NewExtractor(contentType, filename)
+	versionReader := bytes.NewReader(data)
+	versionText, err := versionExt.Extract(versionReader, contentType)
+	if err != nil {
+		log.Printf("[WARN] Failed to extract text from version of %s: %v", filename, err)
+		versionText = ""
+	}
+
+	// Индексируем извлечённый текст
+	_ = s.indexDocument(ctx, docID, versionText)
+	s.invalidateSearchCache(ctx, versionText)
 
 	return version, nil
 }
@@ -374,22 +410,38 @@ func (s *DocumentService) GetDocumentMetadata(
 }
 
 // invalidateSearchCacheByDocument удаляет все ключи кеша, связанные с документом.
-// Используется при изменении is_public или при обновлении содержимого.
+// Использует тот же экстрактор, что и при загрузке, чтобы токены совпадали.
 func (s *DocumentService) invalidateSearchCacheByDocument(ctx context.Context, docID uuid.UUID) {
 	// Получаем документ для извлечения терминов
 	doc, err := s.docRepo.GetByID(ctx, docID)
 	if err != nil {
-		return // не блокируем основной поток, если не удалось получить документ
+		return
 	}
 
-	// Загружаем содержимое файла для токенизации
+	// Скачиваем содержимое файла из S3
 	data, err := s.s3Storage.DownloadFile(ctx, doc.S3Key)
 	if err != nil {
 		return
 	}
 
-	// Инвалидируем кеш по терминам документа
-	s.invalidateSearchCache(ctx, string(data))
+	contentType := doc.MimeType
+	if contentType == "" {
+		contentType = mime.TypeByExtension(filepath.Ext(doc.OriginalFilename))
+	}
+	if contentType == "" {
+		contentType = "text/plain"
+	}
+
+	ext := extractor.NewExtractor(contentType, doc.OriginalFilename)
+	fileReader := bytes.NewReader(data)
+	extractedText, err := ext.Extract(fileReader, contentType)
+	if err != nil {
+		log.Printf("[WARN] Failed to extract text for cache invalidation of %s: %v", doc.OriginalFilename, err)
+		extractedText = ""
+	}
+
+	// Инвалидируем кеш по извлечённому тексту (токены совпадут с индексацией)
+	s.invalidateSearchCache(ctx, extractedText)
 }
 
 // ListByOwner возвращает список документов конкретного пользователя.

@@ -197,15 +197,15 @@ export default function DocumentsPage() {
       const userId = JSON.parse(localStorage.getItem('user') || '{}')?.id;
       
       const endpoint = searchMode === 'title'
-        ? `/search/title?query=${encodeURIComponent(searchQuery)}&limit=50`
-        : `/search/?query=${encodeURIComponent(searchQuery)}&limit=50`;
-      
-      const res = await fetch(endpoint, {
-        headers: {
-          'Authorization': token ? `Bearer ${token}` : '',
-          'X-User-ID': userId || ''
-        }
-      });
+      ? `/search/title?query=${encodeURIComponent(searchQuery)}&owner_id=${userId}&limit=50`
+      : `/search/owner?query=${encodeURIComponent(searchQuery)}&owner_id=${userId}&limit=50`;
+    
+    const res = await fetch(endpoint, {
+      headers: {
+        'Authorization': token ? `Bearer ${token}` : '',
+        'X-User-ID': userId
+      }
+    });
       
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const raw = await res.json();
