@@ -408,3 +408,58 @@ func (r *SearchRepository) GetPositionsByPosting(
 
 	return positions, rows.Err()
 }
+
+// SearchByTitle ищет документы по названию или имени файла.
+// Использует pg_trgm индекс для быстрого ILIKE.
+func (r *SearchRepository) SearchByTitle(
+	ctx context.Context,
+	query string,
+	userID uuid.UUID,
+) ([]uuid.UUID, error) {
+	pattern := "%" + query + "%"
+
+	var sql string
+	var args []interface{}
+
+	if userID == uuid.Nil {
+		// Аноним: только публичные
+		sql = `
+			SELECT id FROM documents
+			WHERE (title ILIKE $1 OR original_filename ILIKE $1)
+			  AND is_public = true
+			ORDER BY 
+				CASE WHEN title ILIKE $2 THEN 1 ELSE 2 END,
+				created_at DESC
+			LIMIT $3
+		`
+		args = []interface{}{pattern, query, 100}
+	} else {
+		// Авторизованный: свои + публичные
+		sql = `
+			SELECT id FROM documents
+			WHERE (title ILIKE $1 OR original_filename ILIKE $1)
+			  AND (owner_id = $2 OR is_public = true)
+			ORDER BY 
+				CASE WHEN title ILIKE $3 THEN 1 ELSE 2 END,
+				created_at DESC
+			LIMIT $4
+		`
+		args = []interface{}{pattern, userID, query, 100}
+	}
+
+	rows, err := r.db.Query(ctx, sql, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var ids []uuid.UUID
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}

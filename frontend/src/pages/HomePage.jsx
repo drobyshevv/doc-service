@@ -9,6 +9,7 @@ export default function HomePage() {
   const [docs, setDocs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState('');
+  const [searchMode, setSearchMode] = useState('content'); 
 
   const loadDocs = async () => {
     setLoading(true);
@@ -33,12 +34,28 @@ export default function HomePage() {
     if (!query.trim()) return loadDocs();
     setLoading(true);
     try {
-      const res = await searchAPI.search(query, { limit: 50 });
-      const raw = Array.isArray(res.data) ? res.data : [];
-      const extracted = raw.map(r => r.document || r.Document || r).filter(d => d?.ID || d?.id);
+
+      const endpoint = searchMode === 'title' 
+        ? `/search/title?query=${encodeURIComponent(query)}&limit=50`
+        : `/search/?query=${encodeURIComponent(query)}&limit=50`;
+      
+      const token = localStorage.getItem('token');
+      const res = await fetch(endpoint, {
+        headers: { 'Authorization': token ? `Bearer ${token}` : '' }
+      });
+      
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const raw = await res.json();
+      
+
+      const extracted = Array.isArray(raw) 
+        ? raw.map(r => r.document || r.Document || r).filter(d => d?.ID || d?.id)
+        : [];
       const unique = [...new Map(extracted.map(d => [d.ID || d.id, d])).values()];
       setDocs(unique);
-    } catch {
+      
+    } catch (err) {
+      console.error('Search error:', err);
       loadDocs();
     } finally {
       setLoading(false);
@@ -123,10 +140,28 @@ export default function HomePage() {
           <p style={{ fontSize: '1.125rem', opacity: 0.9, marginBottom: '1.5rem' }}>
             Безопасное хранение, версионирование и поиск по содержимому
           </p>
-          <div style={{ display: 'flex', gap: '0.5rem', maxWidth: 500, margin: '0 auto' }}>
+          <div style={{ display: 'flex', gap: '0.5rem', maxWidth: 500, margin: '0 auto', alignItems: 'center' }}>
+            {/* Переключатель режима поиска */}
+            <select 
+              value={searchMode}
+              onChange={(e) => setSearchMode(e.target.value)}
+              style={{ 
+                padding: '0.75rem 0.5rem', 
+                fontSize: 14, 
+                borderRadius: 8, 
+                border: 'none',
+                background: 'rgba(255,255,255,0.9)',
+                color: '#1e293b',
+                cursor: 'pointer'
+              }}
+            >
+              <option value="content">📄 Текст</option>
+              <option value="title">🏷️ Заголовок</option>
+            </select>
+            
             <input
               type="search"
-              placeholder="Поиск документов..."
+              placeholder={searchMode === 'title' ? "Название или имя файла..." : "Поиск по содержимому..."}
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleSearch()}

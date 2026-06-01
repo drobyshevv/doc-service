@@ -4,6 +4,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { documentsAPI, searchAPI } from '../services/api';
 
+
 // ХЕЛПЕРЫ (чистые функции, без побочных эффектов)
 
 /** Безопасное получение поля из объекта (поддержка camelCase и snake_case) */
@@ -38,6 +39,7 @@ function DocumentCard({ doc, onDownload, onDelete }) {
   const version = getField(doc, 'CurrentVersion', 'current_version') || 1;
   const isPublic = getField(doc, 'IsPublic', 'is_public');
   const mime = getField(doc, 'MimeType', 'mime_type') || '';
+  
 
   const handleDownload = (e) => {
     e.preventDefault();
@@ -152,6 +154,7 @@ export default function DocumentsPage() {
   const [docs, setDocs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
+  const [searchMode, setSearchMode] = useState('content');
 
   // Загрузка документов
   const loadDocs = async () => {
@@ -190,12 +193,31 @@ export default function DocumentsPage() {
     if (!searchQuery.trim()) return loadDocs();
     setLoading(true);
     try {
-      const res = await searchAPI.search(searchQuery, { limit: 50 });
-      const raw = Array.isArray(res.data) ? res.data : [];
-      const extracted = raw.map(r => getField(r, 'document', 'Document', 'doc') || r).filter(Boolean);
+      const token = localStorage.getItem('token');
+      const userId = JSON.parse(localStorage.getItem('user') || '{}')?.id;
+      
+      const endpoint = searchMode === 'title'
+        ? `/search/title?query=${encodeURIComponent(searchQuery)}&limit=50`
+        : `/search/?query=${encodeURIComponent(searchQuery)}&limit=50`;
+      
+      const res = await fetch(endpoint, {
+        headers: {
+          'Authorization': token ? `Bearer ${token}` : '',
+          'X-User-ID': userId || ''
+        }
+      });
+      
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const raw = await res.json();
+      
+      const extracted = Array.isArray(raw) 
+        ? raw.map(r => getField(r, 'document', 'Document', 'doc') || r).filter(Boolean)
+        : [];
       const unique = [...new Map(extracted.map(d => [getField(d, 'ID', 'id'), d])).values()];
       setDocs(unique);
-    } catch {
+      
+    } catch (err) {
+      console.error('Search error:', err);
       loadDocs();
     } finally {
       setLoading(false);
@@ -256,9 +278,20 @@ export default function DocumentsPage() {
 
         {/* Поиск */}
         <div className="search-bar">
+          {/* Переключатель режима поиска */}
+          <select 
+            value={searchMode}
+            onChange={(e) => setSearchMode(e.target.value)}
+            className="input"
+            style={{ width: 'auto', padding: '0.5rem' }}
+          >
+            <option value="content">📄 Текст</option>
+            <option value="title">🏷️ Заголовок</option>
+          </select>
+          
           <input 
             type="search" 
-            placeholder="Поиск в моих документах..." 
+            placeholder={searchMode === 'title' ? "Название или имя файла..." : "Поиск по содержимому..."}
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && handleSearch()}

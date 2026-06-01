@@ -187,3 +187,40 @@ func (h *SearchHandler) SearchPhraseByOwner(
 
 	json.NewEncoder(w).Encode(results)
 }
+
+// SearchByTitle обрабатывает поиск по названию или имени файла.
+// Возвращает те же поля, что и обычный Search.
+func (h *SearchHandler) SearchByTitle(
+	w http.ResponseWriter,
+	r *http.Request,
+) {
+	query := r.URL.Query().Get("query")
+	if query == "" {
+		json.NewEncoder(w).Encode([]service.SearchResult{})
+		return
+	}
+
+	userIDStr := r.Header.Get("X-User-ID")
+	var userID uuid.UUID
+	if userIDStr != "" {
+		var err error
+		userID, err = uuid.Parse(userIDStr)
+		if err != nil {
+			http.Error(w, "invalid user header", http.StatusInternalServerError)
+			return
+		}
+	}
+
+	results, err := h.searchService.SearchByTitle(
+		r.Context(),
+		query,
+		20,
+		userID,
+	)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	json.NewEncoder(w).Encode(results)
+}

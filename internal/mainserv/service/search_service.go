@@ -397,6 +397,54 @@ func (s *SearchService) Suggest(
 	return s.searchRepo.SuggestTerms(ctx, prefix, limit)
 }
 
+// SearchByTitle ищет документы по title и original_filename.
+// Не трогает инвертированный индекс и поиск по содержимому.
+func (s *SearchService) SearchByTitle(
+	ctx context.Context,
+	query string,
+	limit int,
+	userID uuid.UUID,
+) ([]SearchResult, error) {
+
+	query, err := normalizeQuery(query)
+	if err != nil || query == "" {
+		return []SearchResult{}, err
+	}
+	limit = normalizeLimit(limit)
+
+	titleIDs, err := s.searchRepo.SearchByTitle(ctx, query, userID)
+	if err != nil {
+		return nil, err
+	}
+	if len(titleIDs) == 0 {
+		return []SearchResult{}, nil
+	}
+
+	docs, err := s.docRepo.GetByIDs(ctx, titleIDs)
+	if err != nil {
+		return nil, err
+	}
+
+	results := make([]SearchResult, 0, len(titleIDs))
+	for _, id := range titleIDs {
+		doc := docs[id]
+		if doc == nil {
+			continue
+		}
+		// Для заголовка скор фиксированный: точное совпадение = 100, ILIKE = 90
+		score := float64(90)
+		if strings.EqualFold(doc.Title, query) || strings.EqualFold(doc.OriginalFilename, query) {
+			score = 100
+		}
+		results = append(results, SearchResult{
+			Document: doc,
+			Score:    score,
+		})
+	}
+
+	return results, nil
+}
+
 // calcScore вычисляет TF-IDF score с нормализацией по длине документа.
 func calcScore(tf int, docsWithTerm int, totalDocs int, docLength int) float64 {
 	tfNorm := 1 + math.Log(float64(tf))
