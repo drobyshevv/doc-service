@@ -14,6 +14,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/drobyshevv/doc-service/internal/mainserv/model"
+	"github.com/drobyshevv/doc-service/internal/mainserv/search/proximity"
 	"github.com/drobyshevv/doc-service/internal/mainserv/search/tokenizer"
 	"github.com/drobyshevv/doc-service/internal/mainserv/storage/postgres"
 	redisstorage "github.com/drobyshevv/doc-service/internal/mainserv/storage/redis"
@@ -75,7 +76,7 @@ func normalizeLimit(limit int) int {
 
 // searchRaw выполняет полнотекстовый поиск без фильтрации по доступу.
 // Возвращает все найденные документы (публичные и приватные).
-// Используется как основа для Search и SearchByOwner.
+// Использует Proximity Search для улучшения ранжирования.
 func (s *SearchService) searchRaw(
 	ctx context.Context,
 	query string,
@@ -108,23 +109,68 @@ func (s *SearchService) searchRaw(
 		return nil, err
 	}
 
-	documentScores := make(map[uuid.UUID]float64)
-	docSet := make(map[uuid.UUID]struct{})
-
-	for _, term := range terms {
+	// Собираем postings для всех терминов
+	postingsByTerm := make([][]model.SearchPosting, len(terms))
+	for i, term := range terms {
 		postings, err := s.searchRepo.SearchByTerm(ctx, term)
 		if err != nil {
 			return nil, err
 		}
+		postingsByTerm[i] = postings
+	}
+
+	// Группируем postings по documentID с индексом термина
+	type postingWithTermIdx struct {
+		posting model.SearchPosting
+		termIdx int
+	}
+
+	docMap := make(map[uuid.UUID][]postingWithTermIdx)
+	for termIdx, postings := range postingsByTerm {
 		for _, p := range postings {
-			docSet[p.DocumentID] = struct{}{}
-			score := calcScore(p.TermFrequency, p.DocumentFrequency, totalDocs, 0)
-			documentScores[p.DocumentID] += score
+			docMap[p.DocumentID] = append(docMap[p.DocumentID], postingWithTermIdx{
+				posting: p,
+				termIdx: termIdx,
+			})
 		}
 	}
 
-	docIDs := make([]uuid.UUID, 0, len(docSet))
-	for id := range docSet {
+	documentScores := make(map[uuid.UUID]float64)
+
+	// Для каждого документа рассчитываем score + proximity bonus
+	for docID, postingsWithIdx := range docMap {
+		score := 0.0
+		for _, pwi := range postingsWithIdx {
+			score += calcScore(pwi.posting.TermFrequency, pwi.posting.DocumentFrequency, totalDocs, 0)
+		}
+
+		if len(terms) > 1 {
+			postingIDs := make([]int64, 0, len(postingsWithIdx))
+			for _, pwi := range postingsWithIdx {
+				postingIDs = append(postingIDs, pwi.posting.ID)
+			}
+
+			allPositions, err := s.searchRepo.GetPositionsByPostings(ctx, postingIDs)
+			if err != nil {
+				return nil, err
+			}
+
+			positions := make(map[int][]int)
+			for _, pwi := range postingsWithIdx {
+				if pos, ok := allPositions[pwi.posting.ID]; ok {
+					positions[pwi.termIdx] = pos
+				}
+			}
+
+			proximityBonus := proximity.CalculateProximityBonus(positions)
+			score *= (1 + 0.5*proximityBonus)
+		}
+
+		documentScores[docID] = score
+	}
+
+	docIDs := make([]uuid.UUID, 0, len(documentScores))
+	for id := range documentScores {
 		docIDs = append(docIDs, id)
 	}
 
@@ -349,7 +395,7 @@ func (s *SearchService) SearchPhrase(
 		return nil, err
 	}
 
-	// 🔥 Фильтр: только публичные документы
+	// Фильтр: только публичные документы
 	filtered := make([]SearchResult, 0, len(results))
 	for _, res := range results {
 		if res.Document.IsPublic {

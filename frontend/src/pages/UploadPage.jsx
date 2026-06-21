@@ -14,7 +14,7 @@ export default function UploadPage() {
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!file) {
-      setError('Выберите файл');
+      setError('Выберите файл для загрузки');
       return;
     }
     
@@ -31,66 +31,126 @@ export default function UploadPage() {
       navigate('/');
     } catch (err) {
       console.error('Upload error:', err);
-      setError(err.message || 'Ошибка загрузки');
+      setError(err.response?.data || err.message || 'Ошибка загрузки документа');
     } finally {
       setUploading(false);
     }
   };
 
   return (
-    <div style={{ maxWidth: 600, margin: '2rem auto', padding: '1.5rem' }}>
-      <header style={{ marginBottom: '1rem' }}>
-        <Link to="/"><button>← Назад</button></Link>
-        <h2 style={{ marginTop: '1rem' }}>➕ Загрузка документа</h2>
-      </header>
+    <div className="page-auth">
+      <div className="page-auth__card">
+        {/* Логотип */}
+        <div className="page-auth__logo">
+          <Link to="/" className="logo-link">
+            <div className="logo">D</div>
+            <span>DocService</span>
+          </Link>
+        </div>
 
-      {error && (
-        <p style={{ color: 'red', background: '#fee', padding: '0.5rem', borderRadius: '4px', marginBottom: '1rem' }}>
-          {error}
-        </p>
-      )}
+        {/* Заголовок */}
+        <div className="page-auth__header">
+          <h1 className="page-auth__title">Загрузка документа</h1>
+          <p className="page-auth__subtitle">
+            Добавьте новый документ в систему для индексации и поиска
+          </p>
+        </div>
 
-      <form onSubmit={handleSubmit}>
-        <div style={{ marginBottom: '1rem' }}>
-          <label>Название (опционально)<br />
-            <input 
-              type="text" 
+        {/* Ошибка */}
+        {error && (
+          <div className="page-auth__error" role="alert">
+            {error}
+          </div>
+        )}
+
+        {/* Форма */}
+        <form onSubmit={handleSubmit} className="page-auth__form">
+          <div className="form-group">
+            <label htmlFor="title" className="form-label">
+              Название документа
+            </label>
+            <input
+              id="title"
+              type="text"
               value={title}
-              onChange={e => setTitle(e.target.value)}
+              onChange={(e) => setTitle(e.target.value)}
+              className="input"
               placeholder="По умолчанию — имя файла"
-              style={{ width: '100%', padding: '0.5rem', boxSizing: 'border-box' }}
+              disabled={uploading}
             />
-          </label>
-        </div>
+          </div>
 
-        <div style={{ marginBottom: '1rem' }}>
-          <label>Файл *<br />
-            <input 
-              type="file" 
-              onChange={e => setFile(e.target.files[0])}
+          <div className="form-group">
+            <label htmlFor="file" className="form-label">
+              Файл <span style={{ color: 'var(--danger, #e74c3c)' }}>*</span>
+            </label>
+            <input
+              id="file"
+              type="file"
+              onChange={(e) => setFile(e.target.files[0])}
+              className="input"
               required
-              style={{ width: '100%', padding: '0.5rem' }}
+              disabled={uploading}
+              accept=".pdf,.docx,.txt,.doc"
             />
-          </label>
-        </div>
+            {file && (
+              <p style={{ 
+                marginTop: '0.5rem', 
+                fontSize: '0.875rem', 
+                color: 'var(--text-muted, #7f8c8d)' 
+              }}>
+                Выбран: <strong>{file.name}</strong> ({(file.size / 1024).toFixed(1)} КБ)
+              </p>
+            )}
+          </div>
 
-        <div style={{ marginBottom: '1.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-          <input 
-            type="checkbox" 
-            id="isPublic"
-            checked={isPublic}
-            onChange={e => setIsPublic(e.target.checked)}
-          />
-          <label htmlFor="isPublic">🌐 Публичный документ (виден всем)</label>
-        </div>
+          <div className="form-group">
+            <label 
+              htmlFor="isPublic" 
+              className="form-label"
+              style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer' }}
+            >
+              <input
+                id="isPublic"
+                type="checkbox"
+                checked={isPublic}
+                onChange={(e) => setIsPublic(e.target.checked)}
+                disabled={uploading}
+                style={{ width: '18px', height: '18px', cursor: 'pointer' }}
+              />
+              <span>🌐 Публичный документ (виден всем пользователям)</span>
+            </label>
+            <p style={{ 
+              marginTop: '0.25rem', 
+              fontSize: '0.8125rem', 
+              color: 'var(--text-muted, #7f8c8d)',
+              marginLeft: '1.75rem'
+            }}>
+              Приватные документы видны только вам
+            </p>
+          </div>
 
-        <div style={{ display: 'flex', gap: '0.5rem' }}>
-          <button type="submit" disabled={uploading || !file} style={{ padding: '0.5rem 1rem' }}>
-            {uploading ? 'Загрузка...' : '📤 Загрузить'}
+          <button
+            type="submit"
+            disabled={uploading || !file}
+            className="btn btn-primary btn--full"
+          >
+            {uploading ? 'Загрузка...' : '📤 Загрузить документ'}
           </button>
-          <Link to="/"><button type="button">Отмена</button></Link>
+        </form>
+
+        {/* Ссылки */}
+        <div className="page-auth__footer">
+          <p className="page-auth__text">
+            <Link to="/" className="link-muted">
+              ← Вернуться к списку документов
+            </Link>
+          </p>
+          <p className="page-auth__text" style={{ fontSize: '0.8125rem', marginTop: '0.5rem' }}>
+            Поддерживаемые форматы: <strong>PDF, DOCX, TXT</strong>
+          </p>
         </div>
-      </form>
+      </div>
     </div>
   );
 }

@@ -166,11 +166,7 @@ func (s *DocumentService) indexDocument(
 			return err
 		}
 
-		err = s.searchRepo.CreateTermPositions(
-			ctx,
-			postingID,
-			indexedTerm.Positions,
-		)
+		err = s.searchRepo.CreateTermPositions(ctx, postingID, indexedTerm.Positions)
 		if err != nil {
 			return err
 		}

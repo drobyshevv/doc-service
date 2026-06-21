@@ -409,6 +409,42 @@ func (r *SearchRepository) GetPositionsByPosting(
 	return positions, rows.Err()
 }
 
+// GetPositionsByPostings возвращает позиции для нескольких posting_ids одним запросом.
+// Возвращает map[postingID][]position.
+func (r *SearchRepository) GetPositionsByPostings(
+	ctx context.Context,
+	postingIDs []int64,
+) (map[int64][]int, error) {
+	if len(postingIDs) == 0 {
+		return make(map[int64][]int), nil
+	}
+
+	query := `
+		SELECT posting_id, position
+		FROM term_positions
+		WHERE posting_id = ANY($1)
+		ORDER BY posting_id, position
+	`
+
+	rows, err := r.db.Query(ctx, query, postingIDs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	result := make(map[int64][]int)
+	for rows.Next() {
+		var postingID int64
+		var pos int
+		if err := rows.Scan(&postingID, &pos); err != nil {
+			return nil, err
+		}
+		result[postingID] = append(result[postingID], pos)
+	}
+
+	return result, rows.Err()
+}
+
 // SearchByTitle ищет документы по названию или имени файла.
 // Использует pg_trgm индекс для быстрого ILIKE.
 func (r *SearchRepository) SearchByTitle(
