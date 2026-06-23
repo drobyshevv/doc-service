@@ -118,7 +118,7 @@ export default function UploadPage() {
                 disabled={uploading}
                 style={{ width: '18px', height: '18px', cursor: 'pointer' }}
               />
-              <span>🌐 Публичный документ (виден всем пользователям)</span>
+              <span>Публичный документ (виден всем пользователям)</span>
             </label>
             <p style={{ 
               marginTop: '0.25rem', 
@@ -135,7 +135,7 @@ export default function UploadPage() {
             disabled={uploading || !file}
             className="btn btn-primary btn--full"
           >
-            {uploading ? 'Загрузка...' : '📤 Загрузить документ'}
+            {uploading ? 'Загрузка...' : 'Загрузить документ'}
           </button>
         </form>
 

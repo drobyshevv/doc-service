@@ -127,7 +127,7 @@ function DocumentTabs({ activeTab, onTabChange, versionsCount }) {
         className={`document-tabs__tab ${activeTab === 'info' ? 'document-tabs__tab--active' : ''}`}
         onClick={() => onTabChange('info')}
       >
-        📋 Информация
+        Информация
       </button>
       <button
         role="tab"
@@ -135,7 +135,7 @@ function DocumentTabs({ activeTab, onTabChange, versionsCount }) {
         className={`document-tabs__tab ${activeTab === 'versions' ? 'document-tabs__tab--active' : ''}`}
         onClick={() => onTabChange('versions')}
       >
-        🔄 Версии <span className="document-tabs__count">({versionsCount})</span>
+        Версии <span className="document-tabs__count">({versionsCount})</span>
       </button>
     </nav>
   );

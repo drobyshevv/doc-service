@@ -326,7 +326,7 @@ func (s *SearchService) searchPhraseRaw(
 
 	bytes, err := json.Marshal(results)
 	if err == nil {
-		// TTL 5 минут, как и в searchRaw
+		// TTL 5 min
 		if err := s.redis.Set(ctx, cacheKey, bytes, 5*time.Minute); err != nil {
 			log.Println("REDIS SET ERROR:", err)
 		}

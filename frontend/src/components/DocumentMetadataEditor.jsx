@@ -145,7 +145,7 @@ export default function DocumentMetadataEditor({ documentId, initialTitle, initi
           className="btn btn-ghost btn-sm"
           aria-label="Редактировать метаданные"
         >
-          ✏️ Изменить
+          Изменить
         </button>
       </div>
       

@@ -290,13 +290,11 @@ func (s *DocumentService) GetDocumentVersion(
 	version int,
 ) (*model.DocumentVersion, []byte, error) {
 
-	// Находим запись версии в БД
 	ver, err := s.docRepo.GetVersion(ctx, docID, version)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	// Скачиваем файл из S3
 	data, err := s.s3Storage.DownloadFile(ctx, ver.S3Key)
 	if err != nil {
 		return nil, nil, err
@@ -320,13 +318,11 @@ func (s *DocumentService) RollbackToVersion(
 		return fmt.Errorf("forbidden")
 	}
 
-	// Находим целевую версию
 	targetVer, err := s.docRepo.GetVersion(ctx, docID, targetVersion)
 	if err != nil {
 		return err
 	}
 
-	// Обновляем current_version и метаданные
 	if err := s.docRepo.UpdateCurrentVersion(
 		ctx, docID, targetVersion, targetVer.S3Key,
 		doc.OriginalFilename, targetVer.MimeType, targetVer.FileSize,
@@ -353,7 +349,6 @@ func (s *DocumentService) UpdateDocumentMetadata(
 	input model.UpdateMetadataInput,
 ) (*model.Document, error) {
 
-	// 1. Проверяем права (только владелец может менять метаданные)
 	doc, err := s.docRepo.GetByID(ctx, docID)
 	if err != nil {
 		return nil, err
@@ -362,13 +357,11 @@ func (s *DocumentService) UpdateDocumentMetadata(
 		return nil, fmt.Errorf("forbidden: not document owner")
 	}
 
-	// 2. Обновляем метаданные в БД
 	updatedDoc, err := s.docRepo.UpdateMetadata(ctx, docID, input)
 	if err != nil {
 		return nil, err
 	}
 
-	// 3. Если изменился is_public — инвалидируем кеш поиска
 	if input.IsPublic != nil && *input.IsPublic != doc.IsPublic {
 		s.invalidateSearchCacheByDocument(ctx, docID)
 	}
@@ -397,7 +390,6 @@ func (s *DocumentService) GetDocumentMetadata(
 		return nil, err
 	}
 
-	// Проверка прав: публичный ИЛИ владелец
 	if !meta.IsPublic && meta.OwnerID != requesterID {
 		return nil, fmt.Errorf("forbidden")
 	}
@@ -408,13 +400,11 @@ func (s *DocumentService) GetDocumentMetadata(
 // invalidateSearchCacheByDocument удаляет все ключи кеша, связанные с документом.
 // Использует тот же экстрактор, что и при загрузке, чтобы токены совпадали.
 func (s *DocumentService) invalidateSearchCacheByDocument(ctx context.Context, docID uuid.UUID) {
-	// Получаем документ для извлечения терминов
 	doc, err := s.docRepo.GetByID(ctx, docID)
 	if err != nil {
 		return
 	}
 
-	// Скачиваем содержимое файла из S3
 	data, err := s.s3Storage.DownloadFile(ctx, doc.S3Key)
 	if err != nil {
 		return
@@ -436,7 +426,6 @@ func (s *DocumentService) invalidateSearchCacheByDocument(ctx context.Context, d
 		extractedText = ""
 	}
 
-	// Инвалидируем кеш по извлечённому тексту (токены совпадут с индексацией)
 	s.invalidateSearchCache(ctx, extractedText)
 }
 
@@ -451,7 +440,6 @@ func (s *DocumentService) invalidateSearchCache(ctx context.Context, text string
 	terms = uniqueTermsForCache(terms)
 
 	for _, term := range terms {
-		// Инвалидируем для основных лимитов
 		for _, limit := range []int{20, 50, 100} {
 			key := fmt.Sprintf("searchraw:%s:%d", term, limit)
 			_ = s.redis.Delete(ctx, key)

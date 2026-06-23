@@ -4,7 +4,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { authAPI } from '../services/api';
 
 // ============================================================================
-// 🔹 ХЕЛПЕР: валидация пароля
+// ХЕЛПЕР: валидация пароля
 // ============================================================================
 const validatePassword = (password) => {
   if (password.length < 6) {
@@ -14,7 +14,7 @@ const validatePassword = (password) => {
 };
 
 // ============================================================================
-// 🔹 ОСНОВНОЙ КОМПОНЕНТ
+// ОСНОВНОЙ КОМПОНЕНТ
 // ============================================================================
 export default function RegisterPage() {
   const [email, setEmail] = useState('');
@@ -44,19 +44,19 @@ export default function RegisterPage() {
     setSubmitting(true);
 
     try {
-      // 🔥 Вызов реального эндпоинта регистрации
+      // Вызов реального эндпоинта регистрации
       const response = await authAPI.register(email, password);
       
-      // 🔥 Сохраняем данные пользователя и токен (автоматический вход)
+      // Сохраняем данные пользователя и токен (автоматический вход)
       const { user, tokens } = response.data;
       localStorage.setItem('token', tokens.access_token);
       localStorage.setItem('user', JSON.stringify(user));
       
-      // 🔥 Редирект на главную страницу
+      // Редирект на главную страницу
       navigate('/');
       
     } catch (err) {
-      // 🔥 Обработка ошибок
+      // Обработка ошибок
       console.error('Register error:', err);
       
       const status = err.response?.status;
@@ -86,20 +86,20 @@ export default function RegisterPage() {
           </Link>
         </div>
 
-        {/* 🔹 Заголовок */}
+        {/* Заголовок */}
         <div className="page-auth__header">
           <h1 className="page-auth__title">Создать аккаунт</h1>
           <p className="page-auth__subtitle">Начните хранить документы безопасно</p>
         </div>
 
-        {/* 🔹 Сообщение об ошибке */}
+        {/* Сообщение об ошибке */}
         {error && (
           <div className="page-auth__error" role="alert">
             {error}
           </div>
         )}
 
-        {/* 🔹 Форма регистрации */}
+        {/* Форма регистрации */}
         <form onSubmit={handleSubmit} className="page-auth__form" noValidate>
           
           <div className="form-group">
@@ -162,7 +162,7 @@ export default function RegisterPage() {
           
         </form>
 
-        {/* 🔹 Ссылки */}
+        {/* Ссылки */}
         <div className="page-auth__footer">
           <p className="page-auth__text">
             Уже есть аккаунт?{' '}

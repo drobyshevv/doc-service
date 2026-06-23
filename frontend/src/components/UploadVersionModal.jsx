@@ -59,7 +59,7 @@ export default function UploadVersionModal({ isOpen, onClose, documentId, onSucc
   };
 
   return (
-    <Modal isOpen={isOpen} onClose={handleClose} title="🔄 Загрузить новую версию">
+    <Modal isOpen={isOpen} onClose={handleClose} title="Загрузить новую версию">
       <form onSubmit={handleSubmit} className="modal-form">
         
         {/* Область выбора файла */}

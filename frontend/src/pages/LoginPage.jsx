@@ -99,7 +99,7 @@ export default function LoginPage() {
           </p>
           <p className="page-auth__text">
             <Link to="/search" className="link-muted">
-              🔍 Искать публичные документы без входа
+              Искать публичные документы без входа
             </Link>
           </p>
         </div>

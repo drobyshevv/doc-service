@@ -2,12 +2,10 @@
 import { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { documentsAPI, searchAPI } from '../services/api';
+import { documentsAPI } from '../services/api';
+import DocumentCard from '../components/DocumentCard';
 
-
-// ХЕЛПЕРЫ (чистые функции, без побочных эффектов)
-
-/** Безопасное получение поля из объекта (поддержка camelCase и snake_case) */
+// ХЕЛПЕРЫ
 const getField = (obj, ...names) => {
   for (const name of names) {
     if (obj?.[name] !== undefined && obj?.[name] !== null) return obj[name];
@@ -15,129 +13,36 @@ const getField = (obj, ...names) => {
   return null;
 };
 
-/** Иконка документа по MIME-типу */
-const getFileIcon = (mime) => {
-  if (!mime) return '📄';
-  if (mime.startsWith('image/')) return '🖼️';
-  if (mime.startsWith('video/')) return '🎬';
-  if (mime.startsWith('audio/')) return '🎵';
-  if (mime.includes('pdf')) return '📕';
-  if (mime.includes('word') || mime.includes('document')) return '📘';
-  if (mime.includes('excel') || mime.includes('spreadsheet')) return '📗';
-  if (mime.includes('powerpoint') || mime.includes('presentation')) return '📙';
-  if (mime.includes('text') || mime.includes('markdown')) return '📝';
-  return '📄';
-};
+// ПОД-КОМПОНЕНТЫ
 
-// ПОД-КОМПОНЕНТЫ (изолированная логика отображения)
-
-
-/** Карточка документа для личных документов (с кнопками действий) */
-function DocumentCard({ doc, onDownload, onDelete }) {
-  const id = getField(doc, 'ID', 'id');
-  const title = getField(doc, 'Title', 'title', 'OriginalFilename', 'original_filename') || 'Без названия';
-  const version = getField(doc, 'CurrentVersion', 'current_version') || 1;
-  const isPublic = getField(doc, 'IsPublic', 'is_public');
-  const mime = getField(doc, 'MimeType', 'mime_type') || '';
-  
-
-  const handleDownload = (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    documentsAPI.download(id).then(r => {
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(r.data);
-      a.download = title;
-      a.click();
-      URL.revokeObjectURL(a.href);
-      onDownload?.();
-    });
-  };
-
-  const handleDelete = (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    if (window.confirm(`Удалить документ "${title}"?`)) {
-      onDelete?.(id);
-    }
-  };
-
-  return (
-    <Link 
-      to={`/document/${id}`}
-      className="doc-card group"
-    >
-      <div className="doc-card__content">
-        {/* Иконка + название */}
-        <div className="doc-card__info">
-          <div className="doc-card__icon">{getFileIcon(mime)}</div>
-          <div className="doc-card__text">
-            <h3 className="doc-card__title">{title}</h3>
-            <div className="doc-card__badges">
-              <span className="badge badge-primary">v{version}</span>
-              {isPublic && <span className="badge badge-success">Публичный</span>}
-            </div>
-          </div>
-        </div>
-
-        {/* Кнопки действий (показываются при ховере) */}
-        <div className="doc-card__actions">
-          <button 
-            onClick={handleDownload}
-            className="btn btn-icon"
-            title="Скачать"
-            aria-label="Скачать документ"
-          >
-            <svg className="icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-            </svg>
-          </button>
-          <button 
-            onClick={handleDelete}
-            className="btn btn-icon btn-danger"
-            title="Удалить"
-            aria-label="Удалить документ"
-          >
-            <svg className="icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-            </svg>
-          </button>
-        </div>
-      </div>
-    </Link>
-  );
-}
-
-/** Компонент пустого состояния */
 function EmptyState({ onUpload }) {
   return (
     <div className="empty-state">
-      <div className="empty-state__icon">📁</div>
+      <div className="empty-state__icon">
+        <svg style={{ width: 48, height: 48 }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+        </svg>
+      </div>
       <h3 className="empty-state__title">Нет документов</h3>
       <p className="empty-state__text">Загрузите первый файл, чтобы начать</p>
       <button onClick={onUpload} className="btn btn-primary">
-        ➕ Загрузить документ
+        Загрузить документ
       </button>
     </div>
   );
 }
 
-/** Компонент загрузки (скелетон) */
 function LoadingGrid({ count = 6 }) {
   return (
     <div className="doc-grid">
       {Array.from({ length: count }).map((_, i) => (
-        <div key={i} className="doc-card doc-card--loading">
-          <div className="doc-card__content">
-            <div className="doc-card__info">
-              <div className="doc-card__icon doc-card__icon--skeleton" />
-              <div className="doc-card__text">
-                <div className="doc-card__title doc-card__title--skeleton" />
-                <div className="doc-card__badges">
-                  <div className="badge badge--skeleton" />
-                </div>
-              </div>
-            </div>
+        <div key={i} className="file-card file-card--loading">
+          <div className="file-card__paper">
+            <div className="file-card__extension" style={{ opacity: 0.3 }}>...</div>
+          </div>
+          <div className="file-card__info">
+            <div style={{ height: 16, background: 'var(--color-bg-secondary)', borderRadius: 4, width: '75%', marginBottom: 8 }} />
+            <div style={{ height: 12, background: 'var(--color-bg-secondary)', borderRadius: 4, width: '50%' }} />
           </div>
         </div>
       ))}
@@ -156,7 +61,6 @@ export default function DocumentsPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [searchMode, setSearchMode] = useState('content');
 
-  // Загрузка документов
   const loadDocs = async () => {
     setLoading(true);
     try {
@@ -168,7 +72,6 @@ export default function DocumentsPage() {
           'Authorization': token ? `Bearer ${token}` : '',
           'X-User-ID': userId || ''
         },
-        // Отключаем кеш браузера — гарантируем свежие данные
         cache: 'no-store'
       });
       
@@ -188,7 +91,6 @@ export default function DocumentsPage() {
 
   useEffect(() => { loadDocs(); }, []);
 
-  // Поиск
   const handleSearch = async () => {
     if (!searchQuery.trim()) return loadDocs();
     setLoading(true);
@@ -197,15 +99,15 @@ export default function DocumentsPage() {
       const userId = JSON.parse(localStorage.getItem('user') || '{}')?.id;
       
       const endpoint = searchMode === 'title'
-      ? `/search/title?query=${encodeURIComponent(searchQuery)}&owner_id=${userId}&limit=50`
-      : `/search/owner?query=${encodeURIComponent(searchQuery)}&owner_id=${userId}&limit=50`;
+        ? `/search/title?query=${encodeURIComponent(searchQuery)}&owner_id=${userId}&limit=50`
+        : `/search/owner?query=${encodeURIComponent(searchQuery)}&owner_id=${userId}&limit=50`;
     
-    const res = await fetch(endpoint, {
-      headers: {
-        'Authorization': token ? `Bearer ${token}` : '',
-        'X-User-ID': userId
-      }
-    });
+      const res = await fetch(endpoint, {
+        headers: {
+          'Authorization': token ? `Bearer ${token}` : '',
+          'X-User-ID': userId
+        }
+      });
       
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const raw = await res.json();
@@ -224,7 +126,6 @@ export default function DocumentsPage() {
     }
   };
 
-  // Удаление документа
   const handleDelete = async (id) => {
     try {
       await documentsAPI.delete(id);
@@ -237,17 +138,13 @@ export default function DocumentsPage() {
 
   return (
     <div className="page page--dashboard">
-      {/* Хедер */}
       <header className="header">
         <div className="container header__inner">
-          
-          {/* Логотип */}
           <Link to="/" className="logo-link">
             <div className="logo">D</div>
             <span>DocService</span>
           </Link>
           
-          {/* Кнопки */}
           <div className="header__actions">
             <span className="header__user hide-mobile">{user?.email}</span>
             <button onClick={logout} className="btn btn-outline btn-sm">Выйти</button>
@@ -258,35 +155,30 @@ export default function DocumentsPage() {
               <span className="hide-mobile">Загрузить</span>
             </button>
           </div>
-          
         </div>
       </header>
 
-      {/* Контент */}
       <main className="container page__content">
-        {/* Заголовок + навигация */}
         <div className="page__header">
           <div>
-            <h1 className="page__title">📁 Мои документы</h1>
+            <h1 className="page__title">Мои документы</h1>
             <p className="page__subtitle">Управляйте своими файлами и версиями</p>
           </div>
           <nav className="page__nav">
-            <Link to="/" className="btn btn-outline btn-sm">🏠 Публичные</Link>
-            <Link to="/search" className="btn btn-outline btn-sm">🔍 Поиск</Link>
+            <Link to="/" className="btn btn-outline btn-sm">Публичные</Link>
+            <Link to="/search" className="btn btn-outline btn-sm">Поиск</Link>
           </nav>
         </div>
 
-        {/* Поиск */}
         <div className="search-bar">
-          {/* Переключатель режима поиска */}
           <select 
             value={searchMode}
             onChange={(e) => setSearchMode(e.target.value)}
             className="input"
             style={{ width: 'auto', padding: '0.5rem' }}
           >
-            <option value="content">📄 Текст</option>
-            <option value="title">🏷️ Заголовок</option>
+            <option value="content">По тексту</option>
+            <option value="title">По заголовку</option>
           </select>
           
           <input 
@@ -301,7 +193,6 @@ export default function DocumentsPage() {
           <button onClick={handleSearch} className="btn btn-primary">Найти</button>
         </div>
 
-        {/* Список документов */}
         {loading ? (
           <LoadingGrid />
         ) : docs.length > 0 ? (
@@ -310,8 +201,8 @@ export default function DocumentsPage() {
               <DocumentCard 
                 key={getField(doc, 'ID', 'id')} 
                 doc={doc} 
-                onDownload={() => {}}
-                onDelete={handleDelete}
+                showActions={true}
+                onDelete={() => handleDelete(getField(doc, 'ID', 'id'))}
               />
             ))}
           </div>

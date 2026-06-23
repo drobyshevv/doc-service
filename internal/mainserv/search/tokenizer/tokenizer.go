@@ -150,7 +150,6 @@ func stemEN(word string) string {
 		for _, suf := range enSuffixes {
 			if strings.HasSuffix(result, suf) {
 				candidate := strings.TrimSuffix(result, suf)
-				// Те же простые проверки, что и в русском стеммере
 				if len([]rune(candidate)) >= 3 && hasVowel(candidate) {
 					result = candidate
 					break
