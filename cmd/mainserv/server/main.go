@@ -105,9 +105,7 @@ func main() {
 	router.Route("/search", func(r chi.Router) {
 		r.Get("/", searchHandler.Search)
 		r.Get("/title", searchHandler.SearchByTitle)
-		r.Get("/phrase", searchHandler.SearchPhrase)
 		r.Get("/owner", searchHandler.SearchByOwner)
-		r.Get("/phrase/owner", searchHandler.SearchPhraseByOwner)
 		r.Get("/suggest", searchHandler.Suggest)
 	})
 

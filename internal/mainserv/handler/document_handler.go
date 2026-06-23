@@ -410,15 +410,3 @@ func (h *DocumentHandler) GetMetadata(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(meta)
 }
-
-// Вспомогательная функция для парсинга целочисленных параметров.
-func parseIntParam(s string, defaultValue int) int {
-	if s == "" {
-		return defaultValue
-	}
-	val, err := strconv.Atoi(s)
-	if err != nil || val < 1 {
-		return defaultValue
-	}
-	return val
-}

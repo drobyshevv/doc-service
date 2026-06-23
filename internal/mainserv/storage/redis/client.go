@@ -43,3 +43,13 @@ func (c *Client) Get(ctx context.Context, key string) ([]byte, error) {
 func (c *Client) Delete(ctx context.Context, key string) error {
 	return c.rdb.Del(ctx, key).Err()
 }
+
+// SAdd добавляет элементы в множество Redis (SET).
+func (c *Client) SAdd(ctx context.Context, key string, members ...interface{}) error {
+	return c.rdb.SAdd(ctx, key, members...).Err()
+}
+
+// SMembers возвращает все элементы множества Redis (SET).
+func (c *Client) SMembers(ctx context.Context, key string) ([]string, error) {
+	return c.rdb.SMembers(ctx, key).Result()
+}

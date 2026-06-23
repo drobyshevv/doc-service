@@ -205,130 +205,12 @@ func (s *SearchService) searchRaw(
 	bytes, _ := json.Marshal(results)
 	if err := s.redis.Set(ctx, cacheKey, bytes, 5*time.Minute); err != nil {
 		log.Println("REDIS SET ERROR:", err)
-	}
-
-	return results, nil
-}
-
-// searchPhraseRaw выполняет поиск точной фразы без фильтрации по доступу.
-// Возвращает все найденные документы (публичные и приватные).
-// Используется как основа для SearchPhrase и SearchPhraseByOwner.
-func (s *SearchService) searchPhraseRaw(
-	ctx context.Context,
-	query string,
-	limit int,
-) ([]SearchResult, error) {
-
-	query, err := normalizeQuery(query)
-	if err != nil || query == "" {
-		return []SearchResult{}, err
-	}
-
-	cacheKey := fmt.Sprintf("searchphrase:%s:%d", query, limit)
-
-	cached, err := s.redis.Get(ctx, cacheKey)
-	if err == nil && len(cached) > 0 {
-		var results []SearchResult
-		if json.Unmarshal([]byte(cached), &results) == nil {
-			return results, nil
-		}
-	}
-
-	terms := tokenizer.Tokenize(query)
-	if len(terms) < 2 {
-		// Для одиночных терминов делегируем searchRaw
-		return s.searchRaw(ctx, query, limit)
-	}
-
-	limit = normalizeLimit(limit)
-	totalDocs, err := s.searchRepo.CountDocuments(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	// Собираем postings для каждого термина
-	postingsByTerm := make([][]model.SearchPosting, len(terms))
-	for i, term := range terms {
-		postings, err := s.searchRepo.SearchByTerm(ctx, term)
-		if err != nil {
-			return nil, err
-		}
-		postingsByTerm[i] = postings
-	}
-
-	// Группируем postings по documentID
-	docMap := make(map[uuid.UUID][]model.SearchPosting)
-	for _, postings := range postingsByTerm {
-		for _, p := range postings {
-			docMap[p.DocumentID] = append(docMap[p.DocumentID], p)
-		}
-	}
-
-	documentScores := make(map[uuid.UUID]float64)
-
-	for docID, postings := range docMap {
-		if len(postings) != len(terms) {
-			continue
-		}
-
-		var allPositions [][]int
-		for _, p := range postings {
-			positions, err := s.searchRepo.GetPositionsByPosting(ctx, p.ID)
-			if err != nil {
-				return nil, err
-			}
-			allPositions = append(allPositions, positions)
-		}
-
-		if !isPhraseMatch(allPositions) {
-			continue
-		}
-
-		score := 0.0
-		for _, p := range postings {
-			score += calcScore(p.TermFrequency, p.DocumentFrequency, totalDocs, 0)
-		}
-		documentScores[docID] = score
-	}
-
-	docIDs := make([]uuid.UUID, 0, len(documentScores))
-	for id := range documentScores {
-		docIDs = append(docIDs, id)
-	}
-
-	docs, err := s.docRepo.GetByIDs(ctx, docIDs)
-	if err != nil {
-		return nil, err
-	}
-
-	results := make([]SearchResult, 0)
-	for id, score := range documentScores {
-		doc := docs[id]
-		if doc == nil {
-			continue
-		}
-		if doc.TokenCount > 0 {
-			score /= math.Sqrt(float64(doc.TokenCount))
-		}
-		results = append(results, SearchResult{
-			Document: doc,
-			Score:    score,
-		})
-	}
-
-	sort.Slice(results, func(i, j int) bool {
-		return results[i].Score > results[j].Score
-	})
-
-	if len(results) > limit {
-		results = results[:limit]
-	}
-
-	bytes, err := json.Marshal(results)
-	if err == nil {
-		// TTL 5 min
-		if err := s.redis.Set(ctx, cacheKey, bytes, 5*time.Minute); err != nil {
-			log.Println("REDIS SET ERROR:", err)
+	} else {
+		// Регистрируем ключ кеша в SET для каждого токена запроса.
+		// Это нужно для корректной инвалидации кеша при загрузке/обновлении документов.
+		for _, term := range terms {
+			setKey := fmt.Sprintf("cache_keys:term:%s", term)
+			_ = s.redis.SAdd(ctx, setKey, cacheKey)
 		}
 	}
 
@@ -367,54 +249,6 @@ func (s *SearchService) SearchByOwner(
 ) ([]SearchResult, error) {
 
 	results, err := s.searchRaw(ctx, query, limit)
-	if err != nil {
-		return nil, err
-	}
-
-	filtered := make([]SearchResult, 0)
-	for _, res := range results {
-		if res.Document.OwnerID == ownerID {
-			filtered = append(filtered, res)
-		}
-	}
-	return filtered, nil
-}
-
-// SearchPhrase выполняет поиск точной фразы по всем документам.
-// Возвращает как публичные, так и приватные документы.
-// Для ограничения доступа к приватным документам используйте SearchPhraseByOwner
-// или выполняйте фильтрацию на уровне handler.
-func (s *SearchService) SearchPhrase(
-	ctx context.Context,
-	query string,
-	limit int,
-) ([]SearchResult, error) {
-
-	results, err := s.searchPhraseRaw(ctx, query, limit)
-	if err != nil {
-		return nil, err
-	}
-
-	// Фильтр: только публичные документы
-	filtered := make([]SearchResult, 0, len(results))
-	for _, res := range results {
-		if res.Document.IsPublic {
-			filtered = append(filtered, res)
-		}
-	}
-	return filtered, nil
-}
-
-// SearchPhraseByOwner выполняет поиск точной фразы среди документов конкретного пользователя.
-// Возвращает как публичные, так и приватные документы указанного владельца.
-func (s *SearchService) SearchPhraseByOwner(
-	ctx context.Context,
-	ownerID uuid.UUID,
-	query string,
-	limit int,
-) ([]SearchResult, error) {
-
-	results, err := s.searchPhraseRaw(ctx, query, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -517,34 +351,4 @@ func uniqueTerms(terms []string) []string {
 		return res[:maxTerms]
 	}
 	return res
-}
-
-// isPhraseMatch проверяет, встречаются ли термины в документе в заданном порядке.
-func isPhraseMatch(allPositions [][]int) bool {
-	if len(allPositions) == 0 {
-		return false
-	}
-	first := allPositions[0]
-	for _, start := range first {
-		match := true
-		current := start
-		for i := 1; i < len(allPositions); i++ {
-			found := false
-			for _, pos := range allPositions[i] {
-				if pos == current+1 {
-					found = true
-					current = pos
-					break
-				}
-			}
-			if !found {
-				match = false
-				break
-			}
-		}
-		if match {
-			return true
-		}
-	}
-	return false
 }

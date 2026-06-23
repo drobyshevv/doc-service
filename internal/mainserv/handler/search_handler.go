@@ -45,30 +45,6 @@ func (h *SearchHandler) Search(
 	json.NewEncoder(w).Encode(results)
 }
 
-// SearchPhrase обрабатывает HTTP-запрос
-// на поиск точной фразы.
-//
-// Используется для поиска документов,
-// содержащих последовательность слов в заданном порядке.
-func (h *SearchHandler) SearchPhrase(
-	w http.ResponseWriter,
-	r *http.Request,
-) {
-	query := r.URL.Query().Get("query")
-
-	results, err := h.searchService.SearchPhrase(
-		r.Context(),
-		query,
-		20,
-	)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	json.NewEncoder(w).Encode(results)
-}
-
 // SearchByOwner обрабатывает HTTP-запрос
 // на поиск документов конкретного пользователя.
 //
@@ -133,52 +109,6 @@ func (h *SearchHandler) Suggest(
 		r.Context(),
 		prefix,
 		10,
-	)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	json.NewEncoder(w).Encode(results)
-}
-
-// SearchPhraseByOwner обрабатывает HTTP-запрос на поиск точной фразы
-// среди документов конкретного пользователя.
-func (h *SearchHandler) SearchPhraseByOwner(
-	w http.ResponseWriter,
-	r *http.Request,
-) {
-	query := r.URL.Query().Get("query")
-	owner := r.URL.Query().Get("owner_id")
-
-	ownerID, err := uuid.Parse(owner)
-	if err != nil {
-		http.Error(w, "invalid owner_id", http.StatusBadRequest)
-		return
-	}
-
-	userIDStr := r.Header.Get("X-User-ID")
-	if userIDStr == "" {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
-		return
-	}
-
-	userID, err := uuid.Parse(userIDStr)
-	if err != nil {
-		http.Error(w, "invalid user header", http.StatusInternalServerError)
-		return
-	}
-
-	if ownerID != userID {
-		http.Error(w, "forbidden", http.StatusForbidden)
-		return
-	}
-
-	results, err := h.searchService.SearchPhraseByOwner(
-		r.Context(),
-		ownerID,
-		query,
-		20,
 	)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)

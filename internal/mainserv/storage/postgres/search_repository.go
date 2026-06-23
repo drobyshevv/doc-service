@@ -213,90 +213,6 @@ func (r *SearchRepository) SearchByTerm(
 	return res, rows.Err()
 }
 
-// GetPostingByDocumentAndTerm возвращает posting
-// для конкретного документа и термина.
-func (r *SearchRepository) GetPostingByDocumentAndTerm(
-	ctx context.Context,
-	documentID uuid.UUID,
-	termID int64,
-) (*model.Posting, error) {
-
-	query := `
-		SELECT
-			id,
-			term_id,
-			document_id,
-			term_frequency,
-		FROM postings
-		WHERE document_id = $1 AND term_id = $2
-	`
-
-	var posting model.Posting
-
-	err := r.db.QueryRow(ctx, query, documentID, termID).Scan(
-		&posting.ID,
-		&posting.TermID,
-		&posting.DocumentID,
-		&posting.TermFrequency,
-	)
-	if err != nil {
-		return nil, err
-	}
-
-	return &posting, nil
-}
-
-// SearchPhrase выполняет поиск документов,
-// содержащих набор терминов поисковой фразы.
-//
-// Метод используется как основа
-// для реализации phrase search.
-func (r *SearchRepository) SearchPhrase(
-	ctx context.Context,
-	terms []string,
-) ([]model.SearchPosting, error) {
-
-	query := `
-		SELECT DISTINCT
-			p.id,
-			p.term_id,
-			p.document_id,
-			p.term_frequency,
-			t.document_frequency
-		FROM postings p
-		JOIN terms t ON p.term_id = t.id
-		WHERE t.term = ANY($1)
-		LIMIT 100
-	`
-
-	rows, err := r.db.Query(ctx, query, terms)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var res []model.SearchPosting
-
-	for rows.Next() {
-		var sp model.SearchPosting
-
-		err := rows.Scan(
-			&sp.ID,
-			&sp.TermID,
-			&sp.DocumentID,
-			&sp.TermFrequency,
-			&sp.DocumentFrequency,
-		)
-		if err != nil {
-			return nil, err
-		}
-
-		res = append(res, sp)
-	}
-
-	return res, rows.Err()
-}
-
 // SuggestTerms возвращает список терминов,
 // начинающихся с указанного префикса.
 //
@@ -353,27 +269,6 @@ func (r *SearchRepository) CountDocuments(ctx context.Context) (int, error) {
 	}
 
 	return count, nil
-}
-
-func (r *SearchRepository) GetDocumentFrequency(
-	ctx context.Context,
-	term string,
-) (int, error) {
-
-	query := `
-		SELECT document_frequency
-		FROM terms
-		WHERE term = $1
-	`
-
-	var df int
-
-	err := r.db.QueryRow(ctx, query, term).Scan(&df)
-	if err != nil {
-		return 0, err
-	}
-
-	return df, nil
 }
 
 func (r *SearchRepository) GetPositionsByPosting(

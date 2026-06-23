@@ -440,13 +440,22 @@ func (s *DocumentService) invalidateSearchCache(ctx context.Context, text string
 	terms = uniqueTermsForCache(terms)
 
 	for _, term := range terms {
-		for _, limit := range []int{20, 50, 100} {
-			key := fmt.Sprintf("searchraw:%s:%d", term, limit)
-			_ = s.redis.Delete(ctx, key)
+		setKey := fmt.Sprintf("cache_keys:term:%s", term)
 
-			keyPhrase := fmt.Sprintf("searchphrase:%s:%d", term, limit)
-			_ = s.redis.Delete(ctx, keyPhrase)
+		// Получаем все ключи кеша, связанные с этим токеном
+		keys, err := s.redis.SMembers(ctx, setKey)
+		if err != nil {
+			log.Printf("cache invalidation error for term %s: %v", term, err)
+			continue
 		}
+
+		// Удаляем каждый ключ кеша
+		for _, key := range keys {
+			_ = s.redis.Delete(ctx, key)
+		}
+
+		// Удаляем сам SET
+		_ = s.redis.Delete(ctx, setKey)
 	}
 }
 
