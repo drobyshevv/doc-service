@@ -442,19 +442,16 @@ func (s *DocumentService) invalidateSearchCache(ctx context.Context, text string
 	for _, term := range terms {
 		setKey := fmt.Sprintf("cache_keys:term:%s", term)
 
-		// Получаем все ключи кеша, связанные с этим токеном
 		keys, err := s.redis.SMembers(ctx, setKey)
 		if err != nil {
 			log.Printf("cache invalidation error for term %s: %v", term, err)
 			continue
 		}
 
-		// Удаляем каждый ключ кеша
 		for _, key := range keys {
 			_ = s.redis.Delete(ctx, key)
 		}
 
-		// Удаляем сам SET
 		_ = s.redis.Delete(ctx, setKey)
 	}
 }
